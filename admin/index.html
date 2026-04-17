@@ -1,0 +1,1030 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Hadfield Properties — Admin</title>
+<style>
+  :root {
+    --bg:          #0f1115;
+    --surface:     #1a1d24;
+    --surface2:    #242832;
+    --border:      #323744;
+    --text:        #f1f5f9;
+    --muted:       #94a3b8;
+    --accent:      #f97316;
+    --accent-dark: #ea580c;
+    --success:     #22c55e;
+    --danger:      #ef4444;
+    --radius:      12px;
+    --sans:        -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: var(--sans); min-height: 100%; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .app {
+    display: grid;
+    grid-template-columns: 240px 1fr;
+    min-height: 100vh;
+  }
+  @media (max-width: 860px) {
+    .app { grid-template-columns: 1fr; }
+    aside { position: sticky; top: 0; z-index: 5; border-right: 0 !important; border-bottom: 1px solid var(--border); }
+    aside nav { display: flex; overflow-x: auto; gap: 6px; padding: 10px; }
+    aside nav a { white-space: nowrap; }
+    aside .brand { display: none; }
+    aside .whoami { display: none; }
+  }
+
+  aside {
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    padding: 18px 14px;
+    display: flex; flex-direction: column; gap: 16px;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .logo {
+    width: 36px; height: 36px; border-radius: 9px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-dark));
+    display: grid; place-items: center; font-size: 18px;
+  }
+  .brand h1 { font-size: 15px; margin: 0; }
+  .brand p  { font-size: 11px; margin: 0; color: var(--muted); }
+  aside nav { display: flex; flex-direction: column; gap: 2px; }
+  aside nav a {
+    padding: 10px 12px; border-radius: 8px;
+    color: var(--text); font-size: 14px;
+  }
+  aside nav a.active { background: var(--surface2); color: var(--accent); }
+  .whoami { margin-top: auto; font-size: 12px; color: var(--muted); padding: 8px 12px; }
+
+  main { padding: 26px 32px; max-width: 1400px; }
+  @media (max-width: 640px) { main { padding: 18px 14px; } }
+
+  .pageTitle { font-size: 22px; margin: 0 0 18px; }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin-bottom: 22px; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 16px;
+  }
+  .card .label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .card .value { font-size: 24px; font-weight: 600; margin-top: 4px; }
+  .card.warn { border-color: var(--accent); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); font-weight: 500; }
+  tr:last-child td { border-bottom: 0; }
+
+  .tablewrap {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); overflow: auto;
+  }
+
+  button, .btn {
+    padding: 9px 14px; border-radius: 8px; font-size: 14px;
+    background: var(--surface2); color: var(--text); border: 1px solid var(--border);
+    cursor: pointer; font-family: inherit;
+  }
+  button:hover, .btn:hover { border-color: var(--accent); }
+  button.primary, .btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button.primary:hover { background: var(--accent-dark); }
+  button.danger { color: var(--danger); border-color: var(--danger); background: transparent; }
+  button.ghost { background: transparent; border-color: transparent; padding: 6px 10px; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  input[type="text"], input[type="date"], input[type="number"], input[type="email"],
+  input[type="time"], select, textarea {
+    padding: 9px 12px; font-size: 14px; border-radius: 8px;
+    background: var(--bg); color: var(--text); border: 1px solid var(--border);
+    font-family: inherit; width: 100%;
+  }
+  label.field { display: block; font-size: 12px; color: var(--muted); margin: 8px 0 4px; }
+
+  .toolbar {
+    display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px;
+    align-items: center;
+  }
+  .toolbar .spacer { flex: 1; }
+
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px;
+    background: var(--surface2); border: 1px solid var(--border); color: var(--muted);
+  }
+  .pill.success { color: var(--success); border-color: var(--success); }
+  .pill.warn { color: var(--accent); border-color: var(--accent); }
+  .pill.danger { color: var(--danger); border-color: var(--danger); }
+
+  /* Modal */
+  .modal-bg {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+    display: none; align-items: center; justify-content: center;
+    padding: 20px; z-index: 100;
+  }
+  .modal-bg.show { display: flex; }
+  .modal {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); max-width: 520px; width: 100%;
+    padding: 22px; max-height: 90vh; overflow: auto;
+  }
+  .modal h3 { margin: 0 0 14px; font-size: 18px; }
+  .modal .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; }
+
+  .muted { color: var(--muted); }
+  .hide { display: none !important; }
+
+  /* Chart */
+  .chart {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 16px; margin-bottom: 22px;
+  }
+  .bar-row { display: grid; grid-template-columns: 160px 1fr 60px; gap: 10px; align-items: center; margin: 6px 0; font-size: 13px; }
+  .bar-fill { height: 12px; border-radius: 6px; background: var(--accent); min-width: 2px; }
+  .bar-label { color: var(--text); }
+  .bar-value { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  .toast {
+    position: fixed; bottom: 24px; right: 24px; z-index: 200;
+    background: var(--surface); border: 1px solid var(--border);
+    color: var(--text); padding: 12px 18px; border-radius: 10px;
+    font-size: 14px; opacity: 0; transition: opacity 180ms ease;
+  }
+  .toast.show { opacity: 1; }
+  .toast.error { border-color: var(--danger); }
+  .toast.success { border-color: var(--success); }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <div class="brand">
+      <div class="logo">🔨</div>
+      <div>
+        <h1>Hadfield</h1>
+        <p>Admin panel</p>
+      </div>
+    </div>
+    <nav>
+      <a href="#dashboard" class="active">Dashboard</a>
+      <a href="#entries">Time entries</a>
+      <a href="#workers">Workers</a>
+      <a href="#jobsites">Jobsites</a>
+      <a href="#tasks">Tasks</a>
+      <a href="#reports">Reports</a>
+      <a href="#settings">Settings</a>
+    </nav>
+    <div class="whoami" id="whoami">…</div>
+  </aside>
+
+  <main>
+    <!-- Dashboard -->
+    <section id="page-dashboard">
+      <h2 class="pageTitle">Dashboard</h2>
+      <div id="dashCards" class="cards"></div>
+
+      <div class="chart">
+        <h3 style="margin:0 0 12px;font-size:15px;">This week — hours per worker</h3>
+        <div id="weekChart"></div>
+      </div>
+
+      <div class="tablewrap" style="margin-bottom:22px;">
+        <div style="padding:12px 14px;border-bottom:1px solid var(--border);font-weight:600;font-size:14px;">🟢 Currently clocked in</div>
+        <table id="liveTable"><tbody></tbody></table>
+      </div>
+
+      <div class="tablewrap">
+        <div style="padding:12px 14px;border-bottom:1px solid var(--border);font-weight:600;font-size:14px;color:var(--accent);">⚠️ Anomalies (shifts over 12 hrs — probably forgot to clock out)</div>
+        <table id="anomalyTable"><tbody></tbody></table>
+      </div>
+    </section>
+
+    <!-- Entries -->
+    <section id="page-entries" class="hide">
+      <h2 class="pageTitle">Time entries</h2>
+      <div class="toolbar">
+        <label class="field" style="margin:0;">From <input id="entFrom" type="date" /></label>
+        <label class="field" style="margin:0;">To <input id="entTo" type="date" /></label>
+        <label class="field" style="margin:0;">Worker <select id="entWorker"><option value="">All</option></select></label>
+        <label class="field" style="margin:0;">Jobsite <select id="entJobsite"><option value="">All</option></select></label>
+        <button class="primary" id="entApply">Apply</button>
+        <div class="spacer"></div>
+        <button id="entAdd">+ Add missing punch</button>
+      </div>
+      <div class="tablewrap">
+        <table id="entriesTable">
+          <thead><tr>
+            <th>Worker</th><th>Jobsite</th><th>Task</th>
+            <th>Clock in</th><th>Clock out</th><th>Hours</th>
+            <th>Notes</th><th></th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Workers -->
+    <section id="page-workers" class="hide">
+      <h2 class="pageTitle">Workers</h2>
+      <div class="toolbar">
+        <div class="spacer"></div>
+        <button class="primary" id="workerAdd">+ Add worker</button>
+      </div>
+      <div class="tablewrap">
+        <table id="workersTable">
+          <thead><tr>
+            <th>Name</th><th>Phone</th><th>Rate</th><th>QB ID</th><th>Status</th><th></th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Jobsites -->
+    <section id="page-jobsites" class="hide">
+      <h2 class="pageTitle">Jobsites</h2>
+      <div class="toolbar">
+        <div class="spacer"></div>
+        <button class="primary" id="jobAdd">+ Add jobsite</button>
+      </div>
+      <div class="tablewrap">
+        <table id="jobsitesTable">
+          <thead><tr><th>Name</th><th>Address</th><th>Status</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Tasks -->
+    <section id="page-tasks" class="hide">
+      <h2 class="pageTitle">Tasks / cost codes</h2>
+      <div class="toolbar">
+        <div class="spacer"></div>
+        <button class="primary" id="taskAdd">+ Add task</button>
+      </div>
+      <div class="tablewrap">
+        <table id="tasksTable">
+          <thead><tr><th>Name</th><th>QB service item</th><th>Status</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Reports -->
+    <section id="page-reports" class="hide">
+      <h2 class="pageTitle">Reports</h2>
+      <div class="cards">
+        <div class="card">
+          <div class="label">Per-worker PDF timesheet</div>
+          <div style="margin-top:12px;">
+            <label class="field">Worker <select id="rptWorker"></select></label>
+            <div class="row2" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+              <div><label class="field">From</label><input id="rptFrom" type="date" /></div>
+              <div><label class="field">To</label><input id="rptTo" type="date" /></div>
+            </div>
+            <button class="primary" id="rptPdf" style="margin-top:12px;">Generate PDF</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="label">QuickBooks CSV export</div>
+          <div style="margin-top:12px;">
+            <div class="row2" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+              <div><label class="field">From</label><input id="csvFrom" type="date" /></div>
+              <div><label class="field">To</label><input id="csvTo" type="date" /></div>
+            </div>
+            <button class="primary" id="csvDownload" style="margin-top:12px;">Download CSV</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="label">Payroll summary</div>
+          <div style="margin-top:12px;">
+            <div class="row2" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+              <div><label class="field">From</label><input id="psFrom" type="date" /></div>
+              <div><label class="field">To</label><input id="psTo" type="date" /></div>
+            </div>
+            <button class="primary" id="psShow" style="margin-top:12px;">Show summary</button>
+          </div>
+          <div id="psResult" style="margin-top:14px;"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Settings -->
+    <section id="page-settings" class="hide">
+      <h2 class="pageTitle">Settings</h2>
+      <div class="card" style="max-width:520px;">
+        <label class="field">Company name</label>
+        <input id="setCompany" type="text" />
+        <label class="field">Timezone</label>
+        <input id="setTz" type="text" placeholder="America/Los_Angeles" />
+        <label class="field">Pay period</label>
+        <select id="setPeriod">
+          <option value="weekly">Weekly</option>
+          <option value="biweekly">Biweekly</option>
+        </select>
+        <label class="field">Long shift threshold (hours)</label>
+        <input id="setLongShift" type="number" min="1" max="24" />
+        <div style="margin-top:14px;"><button class="primary" id="setSave">Save settings</button></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div id="modalBg" class="modal-bg"><div class="modal" id="modalBox"></div></div>
+<div id="toast" class="toast"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+<script>
+/* =============================================================================
+ * Hadfield Admin Panel
+ *
+ * Same-origin API at /api/admin/* — protected by Cloudflare Access (TOTP).
+ * This HTML sits behind CF Access at /admin/*, so the browser already has a
+ * valid CF_Authorization cookie by the time the JS runs. Every fetch below
+ * includes credentials so CF Access forwards the JWT to the Worker.
+ * ============================================================================= */
+
+const API = '/api/admin';
+const state = {
+  workers: [],
+  jobsites: [],
+  tasks: [],
+  settings: {},
+};
+const DAY = 86400000;
+
+// ---- helpers ----
+const $ = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+function toast(msg, kind = '') {
+  const t = $('#toast'); t.className = 'toast show ' + kind;
+  t.textContent = msg; setTimeout(() => t.classList.remove('show'), 2400);
+}
+function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function fmtTs(ts) {
+  if (!ts) return '';
+  return new Date(ts).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+function fmtDate(ts) {
+  if (!ts) return '';
+  return new Date(ts).toLocaleDateString([], { year: 'numeric', month: '2-digit', day: '2-digit' });
+}
+function fmtHours(ms) { return (ms / 3600000).toFixed(2); }
+function toDateInput(ts) { const d = new Date(ts); return d.toISOString().slice(0, 10); }
+function fromDateInput(s, endOfDay = false) {
+  if (!s) return null;
+  // Interpret date as local midnight
+  const [y, m, d] = s.split('-').map(Number);
+  return new Date(y, m - 1, d, endOfDay ? 23 : 0, endOfDay ? 59 : 0, endOfDay ? 59 : 0).getTime();
+}
+function hhmm(ts) { const d = new Date(ts); return d.toTimeString().slice(0, 5); }
+
+async function api(path, opts = {}) {
+  const r = await fetch(API + path, {
+    credentials: 'include',
+    headers: { 'content-type': 'application/json' },
+    ...opts,
+  });
+  if (r.status === 401 || r.status === 403) {
+    // Force CF Access re-auth
+    toast('Signed out — reloading', 'error');
+    setTimeout(() => location.reload(), 1200);
+    throw new Error('unauthenticated');
+  }
+  if (!r.ok) {
+    let body = {};
+    try { body = await r.json(); } catch {}
+    throw new Error(body.error || ('HTTP ' + r.status));
+  }
+  return r.json();
+}
+
+// ---- routing ----
+const pages = ['dashboard', 'entries', 'workers', 'jobsites', 'tasks', 'reports', 'settings'];
+function showPage(p) {
+  pages.forEach(k => $('#page-' + k).classList.toggle('hide', k !== p));
+  $$('aside nav a').forEach(a => a.classList.toggle('active', a.getAttribute('href') === '#' + p));
+  const loaders = {
+    dashboard: loadDashboard,
+    entries: loadEntries,
+    workers: loadWorkers,
+    jobsites: loadJobsites,
+    tasks: loadTasks,
+    reports: loadReports,
+    settings: loadSettings,
+  };
+  loaders[p] && loaders[p]();
+}
+window.addEventListener('hashchange', () => showPage((location.hash || '#dashboard').slice(1)));
+
+// ---- modal ----
+function modal(html) {
+  $('#modalBox').innerHTML = html;
+  $('#modalBg').classList.add('show');
+}
+function closeModal() { $('#modalBg').classList.remove('show'); }
+$('#modalBg').addEventListener('click', e => { if (e.target === $('#modalBg')) closeModal(); });
+
+// ---- Dashboard ----
+async function loadDashboard() {
+  try {
+    const d = await api('/dashboard');
+    const todayTotal = d.today.reduce((a, b) => a + b.ms, 0);
+    const weekTotal  = d.week.reduce((a, b) => a + b.ms, 0);
+    $('#dashCards').innerHTML = `
+      <div class="card"><div class="label">Currently clocked in</div><div class="value">${d.live.length}</div></div>
+      <div class="card"><div class="label">Hours today (team)</div><div class="value">${fmtHours(todayTotal)}</div></div>
+      <div class="card"><div class="label">Hours this week (team)</div><div class="value">${fmtHours(weekTotal)}</div></div>
+      <div class="card ${d.anomalies.length ? 'warn' : ''}"><div class="label">Anomalies</div><div class="value">${d.anomalies.length}</div></div>
+    `;
+    // live
+    const live = d.live.map(e => {
+      const ms = d.now - e.clock_in;
+      return `<tr>
+        <td>${esc(e.full_name)}</td>
+        <td>${esc(e.jobsite || '—')}</td>
+        <td>${esc(e.task || '—')}</td>
+        <td>since ${fmtTs(e.clock_in)} <span class="muted">(${fmtHours(ms)} hr)</span></td>
+      </tr>`;
+    }).join('') || `<tr><td colspan="4" class="muted" style="text-align:center;padding:20px;">No one is clocked in right now</td></tr>`;
+    $('#liveTable tbody').innerHTML = live;
+    // chart
+    const max = Math.max(1, ...d.week.map(w => w.ms));
+    $('#weekChart').innerHTML = d.week.map(w => `
+      <div class="bar-row">
+        <div class="bar-label">${esc(w.full_name)}</div>
+        <div><div class="bar-fill" style="width:${(w.ms / max * 100).toFixed(1)}%"></div></div>
+        <div class="bar-value">${fmtHours(w.ms)} hr</div>
+      </div>
+    `).join('') || `<div class="muted" style="padding:8px;">No hours yet this week</div>`;
+    // anomalies
+    $('#anomalyTable tbody').innerHTML = d.anomalies.map(a => `
+      <tr>
+        <td>${esc(a.full_name)}</td>
+        <td>${esc(a.jobsite || '—')}</td>
+        <td>Clocked in ${fmtTs(a.clock_in)} (still open)</td>
+        <td><a href="#entries" onclick="sessionStorage.setItem('jump-entry','${a.id}')">Fix →</a></td>
+      </tr>
+    `).join('') || `<tr><td colspan="4" class="muted" style="text-align:center;padding:20px;">No anomalies</td></tr>`;
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+// ---- Entries ----
+async function ensureDimensions() {
+  if (state.workers.length === 0) {
+    const r = await api('/workers'); state.workers = r.workers;
+  }
+  if (state.jobsites.length === 0) {
+    const r = await api('/jobsites'); state.jobsites = r.jobsites;
+  }
+  if (state.tasks.length === 0) {
+    const r = await api('/tasks'); state.tasks = r.tasks;
+  }
+}
+async function loadEntries() {
+  await ensureDimensions();
+  // populate filter selects
+  $('#entWorker').innerHTML = '<option value="">All</option>' + state.workers.map(w => `<option value="${w.id}">${esc(w.full_name)}</option>`).join('');
+  $('#entJobsite').innerHTML = '<option value="">All</option>' + state.jobsites.map(j => `<option value="${j.id}">${esc(j.name)}</option>`).join('');
+  // default dates: last 7 days
+  if (!$('#entFrom').value) {
+    $('#entFrom').value = toDateInput(Date.now() - 7 * DAY);
+    $('#entTo').value   = toDateInput(Date.now());
+  }
+  await refreshEntries();
+}
+async function refreshEntries() {
+  const q = new URLSearchParams();
+  const f = fromDateInput($('#entFrom').value);
+  const t = fromDateInput($('#entTo').value, true);
+  if (f) q.set('from', f);
+  if (t) q.set('to', t);
+  if ($('#entWorker').value) q.set('worker_id', $('#entWorker').value);
+  if ($('#entJobsite').value) q.set('jobsite_id', $('#entJobsite').value);
+  try {
+    const r = await api('/entries?' + q.toString());
+    $('#entriesTable tbody').innerHTML = r.entries.map(e => {
+      const hrs = e.clock_out ? fmtHours(e.clock_out - e.clock_in) : '<span class="pill warn">open</span>';
+      const edited = e.edited_by_admin ? ' <span class="pill" title="Edited by admin">✎</span>' : '';
+      return `<tr>
+        <td>${esc(e.worker_name)}${edited}</td>
+        <td>${esc(e.jobsite_name || '—')}</td>
+        <td>${esc(e.task_name || '—')}</td>
+        <td>${fmtTs(e.clock_in)}</td>
+        <td>${e.clock_out ? fmtTs(e.clock_out) : '<span class="muted">—</span>'}</td>
+        <td>${hrs}</td>
+        <td class="muted" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(e.notes || '')}</td>
+        <td>
+          <button class="ghost" onclick="editEntry(${e.id})">✎</button>
+          <button class="ghost" onclick="deleteEntry(${e.id})">🗑</button>
+        </td>
+      </tr>`;
+    }).join('') || `<tr><td colspan="8" class="muted" style="text-align:center;padding:20px;">No entries in this range</td></tr>`;
+    // jump-to from dashboard anomalies
+    const jump = sessionStorage.getItem('jump-entry');
+    if (jump) {
+      sessionStorage.removeItem('jump-entry');
+      editEntry(Number(jump));
+    }
+  } catch (e) { toast(e.message, 'error'); }
+}
+window.editEntry = async function (id) {
+  // fetch full entry via entries endpoint (re-use latest list)
+  const q = new URLSearchParams({ from: 0, to: Date.now() });
+  const r = await api('/entries?' + q.toString());
+  const e = r.entries.find(x => x.id === id);
+  if (!e) return toast('Entry not found', 'error');
+  modal(`
+    <h3>Edit entry</h3>
+    <label class="field">Worker</label>
+    <select id="mWorker">${state.workers.map(w => `<option value="${w.id}" ${w.id===e.worker_id?'selected':''}>${esc(w.full_name)}</option>`).join('')}</select>
+    <label class="field">Jobsite</label>
+    <select id="mJob"><option value="">—</option>${state.jobsites.map(j => `<option value="${j.id}" ${j.id===e.jobsite_id?'selected':''}>${esc(j.name)}</option>`).join('')}</select>
+    <label class="field">Task</label>
+    <select id="mTask"><option value="">—</option>${state.tasks.map(t => `<option value="${t.id}" ${t.id===e.task_id?'selected':''}>${esc(t.name)}</option>`).join('')}</select>
+    <div class="row2" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+      <div><label class="field">Clock-in date</label><input id="mInDate" type="date" value="${toDateInput(e.clock_in)}" /></div>
+      <div><label class="field">Clock-in time</label><input id="mInTime" type="time" value="${hhmm(e.clock_in)}" /></div>
+      <div><label class="field">Clock-out date</label><input id="mOutDate" type="date" value="${e.clock_out ? toDateInput(e.clock_out) : ''}" /></div>
+      <div><label class="field">Clock-out time</label><input id="mOutTime" type="time" value="${e.clock_out ? hhmm(e.clock_out) : ''}" /></div>
+    </div>
+    <label class="field">Notes</label>
+    <textarea id="mNotes" rows="2">${esc(e.notes || '')}</textarea>
+    <div class="modal-actions">
+      <button onclick="closeModal()">Cancel</button>
+      <button class="primary" onclick="saveEntry(${id})">Save</button>
+    </div>
+  `);
+};
+window.closeModal = closeModal;
+window.saveEntry = async function (id) {
+  try {
+    const ci = combineDT($('#mInDate').value, $('#mInTime').value);
+    const co = ($('#mOutDate').value && $('#mOutTime').value) ? combineDT($('#mOutDate').value, $('#mOutTime').value) : null;
+    await api('/entries/' + id, { method: 'PATCH', body: JSON.stringify({
+      worker_id: Number($('#mWorker').value),
+      jobsite_id: $('#mJob').value || null,
+      task_id: $('#mTask').value || null,
+      clock_in: ci, clock_out: co,
+      notes: $('#mNotes').value,
+    })});
+    toast('Saved', 'success');
+    closeModal(); await refreshEntries();
+  } catch (e) { toast(e.message, 'error'); }
+};
+window.deleteEntry = async function (id) {
+  if (!confirm('Delete this entry? (The deletion is logged in the audit trail.)')) return;
+  try { await api('/entries/' + id, { method: 'DELETE' }); toast('Deleted', 'success'); await refreshEntries(); }
+  catch (e) { toast(e.message, 'error'); }
+};
+
+function combineDT(dateStr, timeStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const [hh, mm] = timeStr.split(':').map(Number);
+  return new Date(y, m - 1, d, hh, mm, 0).getTime();
+}
+
+// Add missing punch
+$('#entAdd').addEventListener('click', () => {
+  modal(`
+    <h3>Add missing punch</h3>
+    <label class="field">Worker</label>
+    <select id="mWorker">${state.workers.map(w => `<option value="${w.id}">${esc(w.full_name)}</option>`).join('')}</select>
+    <label class="field">Jobsite</label>
+    <select id="mJob"><option value="">—</option>${state.jobsites.map(j => `<option value="${j.id}">${esc(j.name)}</option>`).join('')}</select>
+    <label class="field">Task</label>
+    <select id="mTask"><option value="">—</option>${state.tasks.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('')}</select>
+    <div class="row2" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+      <div><label class="field">Clock-in date</label><input id="mInDate" type="date" value="${toDateInput(Date.now())}" /></div>
+      <div><label class="field">Clock-in time</label><input id="mInTime" type="time" value="07:00" /></div>
+      <div><label class="field">Clock-out date</label><input id="mOutDate" type="date" value="${toDateInput(Date.now())}" /></div>
+      <div><label class="field">Clock-out time</label><input id="mOutTime" type="time" value="15:30" /></div>
+    </div>
+    <label class="field">Notes</label>
+    <textarea id="mNotes" rows="2"></textarea>
+    <div class="modal-actions">
+      <button onclick="closeModal()">Cancel</button>
+      <button class="primary" id="mSave">Add</button>
+    </div>
+  `);
+  $('#mSave').addEventListener('click', async () => {
+    try {
+      const ci = combineDT($('#mInDate').value, $('#mInTime').value);
+      const co = ($('#mOutDate').value && $('#mOutTime').value) ? combineDT($('#mOutDate').value, $('#mOutTime').value) : null;
+      await api('/entries', { method: 'POST', body: JSON.stringify({
+        worker_id: Number($('#mWorker').value),
+        jobsite_id: $('#mJob').value || null,
+        task_id: $('#mTask').value || null,
+        clock_in: ci, clock_out: co,
+        notes: $('#mNotes').value,
+      })});
+      toast('Added', 'success'); closeModal(); await refreshEntries();
+    } catch (e) { toast(e.message, 'error'); }
+  });
+});
+$('#entApply').addEventListener('click', refreshEntries);
+
+// ---- Workers CRUD ----
+async function loadWorkers() {
+  try {
+    const r = await api('/workers'); state.workers = r.workers;
+    $('#workersTable tbody').innerHTML = r.workers.map(w => `
+      <tr>
+        <td>${esc(w.full_name)}</td>
+        <td>${esc(w.phone || '—')}</td>
+        <td>${w.hourly_rate != null ? '$' + Number(w.hourly_rate).toFixed(2) + '/hr' : '—'}</td>
+        <td>${esc(w.qb_employee_id || '—')}</td>
+        <td>${w.active ? '<span class="pill success">active</span>' : '<span class="pill">inactive</span>'}</td>
+        <td>
+          <button class="ghost" onclick="editWorker(${w.id})">Edit</button>
+          <button class="ghost" onclick="regenPin(${w.id})">New PIN</button>
+          ${w.active ? `<button class="ghost danger" onclick="deactivateWorker(${w.id})">Deactivate</button>` : `<button class="ghost" onclick="reactivateWorker(${w.id})">Reactivate</button>`}
+        </td>
+      </tr>
+    `).join('') || `<tr><td colspan="6" class="muted" style="text-align:center;padding:20px;">No workers yet — click "+ Add worker" to create one</td></tr>`;
+  } catch (e) { toast(e.message, 'error'); }
+}
+$('#workerAdd').addEventListener('click', () => {
+  const pin = String(Math.floor(1000 + Math.random() * 9000));
+  modal(`
+    <h3>Add worker</h3>
+    <label class="field">Full name</label><input id="wName" type="text" placeholder="e.g. John Smith" />
+    <label class="field">Phone (optional)</label><input id="wPhone" type="text" placeholder="optional" />
+    <div class="row2" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+      <div><label class="field">4-digit PIN</label><input id="wPin" type="text" maxlength="4" value="${pin}" /></div>
+      <div><label class="field">Hourly rate (optional)</label><input id="wRate" type="number" step="0.01" /></div>
+    </div>
+    <label class="field">QuickBooks employee ID (optional)</label><input id="wQb" type="text" />
+    <p class="muted" style="font-size:12px;margin-top:10px;">Tell the worker this PIN verbally — it's the only time it's shown.</p>
+    <div class="modal-actions">
+      <button onclick="closeModal()">Cancel</button>
+      <button class="primary" id="wSave">Add worker</button>
+    </div>
+  `);
+  $('#wSave').addEventListener('click', async () => {
+    try {
+      const name = $('#wName').value.trim(); if (!name) return toast('Name required', 'error');
+      const p = $('#wPin').value; if (!/^\d{4}$/.test(p)) return toast('PIN must be 4 digits', 'error');
+      await api('/workers', { method: 'POST', body: JSON.stringify({
+        full_name: name, phone: $('#wPhone').value || null,
+        pin: p, hourly_rate: $('#wRate').value || null,
+        qb_employee_id: $('#wQb').value || null,
+      })});
+      toast('Added — PIN is ' + p, 'success'); closeModal(); await loadWorkers();
+    } catch (e) { toast(e.message, 'error'); }
+  });
+});
+window.editWorker = async function (id) {
+  const w = state.workers.find(x => x.id === id); if (!w) return;
+  modal(`
+    <h3>Edit ${esc(w.full_name)}</h3>
+    <label class="field">Full name</label><input id="wName" type="text" value="${esc(w.full_name)}" />
+    <label class="field">Phone</label><input id="wPhone" type="text" value="${esc(w.phone || '')}" />
+    <div class="row2" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+      <div><label class="field">Hourly rate</label><input id="wRate" type="number" step="0.01" value="${w.hourly_rate ?? ''}" /></div>
+      <div><label class="field">QB employee ID</label><input id="wQb" type="text" value="${esc(w.qb_employee_id || '')}" /></div>
+    </div>
+    <div class="modal-actions">
+      <button onclick="closeModal()">Cancel</button>
+      <button class="primary" id="wSave">Save</button>
+    </div>
+  `);
+  $('#wSave').addEventListener('click', async () => {
+    try {
+      await api('/workers/' + id, { method: 'PATCH', body: JSON.stringify({
+        full_name: $('#wName').value.trim(),
+        phone: $('#wPhone').value || null,
+        hourly_rate: $('#wRate').value === '' ? null : Number($('#wRate').value),
+        qb_employee_id: $('#wQb').value || null,
+      })});
+      toast('Saved', 'success'); closeModal(); await loadWorkers();
+    } catch (e) { toast(e.message, 'error'); }
+  });
+};
+window.regenPin = async function (id) {
+  const w = state.workers.find(x => x.id === id);
+  const pin = String(Math.floor(1000 + Math.random() * 9000));
+  if (!confirm(`Generate new PIN ${pin} for ${w.full_name}? Tell them verbally.`)) return;
+  try { await api('/workers/' + id, { method: 'PATCH', body: JSON.stringify({ pin }) }); toast('New PIN: ' + pin, 'success'); }
+  catch (e) { toast(e.message, 'error'); }
+};
+window.deactivateWorker = async function (id) {
+  if (!confirm('Deactivate this worker? Their history is preserved.')) return;
+  try { await api('/workers/' + id, { method: 'PATCH', body: JSON.stringify({ active: false }) }); await loadWorkers(); }
+  catch (e) { toast(e.message, 'error'); }
+};
+window.reactivateWorker = async function (id) {
+  try { await api('/workers/' + id, { method: 'PATCH', body: JSON.stringify({ active: true }) }); await loadWorkers(); }
+  catch (e) { toast(e.message, 'error'); }
+};
+
+// ---- Jobsites ----
+async function loadJobsites() {
+  try {
+    const r = await api('/jobsites'); state.jobsites = r.jobsites;
+    $('#jobsitesTable tbody').innerHTML = r.jobsites.map(j => `
+      <tr>
+        <td>${esc(j.name)}</td>
+        <td>${esc(j.address || '—')}</td>
+        <td>${j.active ? '<span class="pill success">active</span>' : '<span class="pill">archived</span>'}</td>
+        <td>
+          <button class="ghost" onclick="editJob(${j.id})">Edit</button>
+          ${j.active ? `<button class="ghost danger" onclick="archiveJob(${j.id})">Archive</button>` : `<button class="ghost" onclick="unarchiveJob(${j.id})">Unarchive</button>`}
+        </td>
+      </tr>
+    `).join('') || `<tr><td colspan="4" class="muted" style="text-align:center;padding:20px;">No jobsites yet</td></tr>`;
+  } catch (e) { toast(e.message, 'error'); }
+}
+$('#jobAdd').addEventListener('click', () => {
+  modal(`
+    <h3>Add jobsite</h3>
+    <label class="field">Name</label><input id="jName" type="text" placeholder="e.g. Maple Street Remodel" />
+    <label class="field">Address (optional)</label><input id="jAddr" type="text" />
+    <div class="modal-actions">
+      <button onclick="closeModal()">Cancel</button>
+      <button class="primary" id="jSave">Add</button>
+    </div>
+  `);
+  $('#jSave').addEventListener('click', async () => {
+    try {
+      const name = $('#jName').value.trim(); if (!name) return toast('Name required', 'error');
+      await api('/jobsites', { method: 'POST', body: JSON.stringify({ name, address: $('#jAddr').value || null })});
+      toast('Added', 'success'); closeModal(); await loadJobsites();
+    } catch (e) { toast(e.message, 'error'); }
+  });
+});
+window.editJob = async function (id) {
+  const j = state.jobsites.find(x => x.id === id); if (!j) return;
+  modal(`
+    <h3>Edit ${esc(j.name)}</h3>
+    <label class="field">Name</label><input id="jName" type="text" value="${esc(j.name)}" />
+    <label class="field">Address</label><input id="jAddr" type="text" value="${esc(j.address || '')}" />
+    <div class="modal-actions">
+      <button onclick="closeModal()">Cancel</button>
+      <button class="primary" id="jSave">Save</button>
+    </div>
+  `);
+  $('#jSave').addEventListener('click', async () => {
+    try {
+      await api('/jobsites/' + id, { method: 'PATCH', body: JSON.stringify({ name: $('#jName').value.trim(), address: $('#jAddr').value || null })});
+      toast('Saved', 'success'); closeModal(); await loadJobsites();
+    } catch (e) { toast(e.message, 'error'); }
+  });
+};
+window.archiveJob = async function (id) {
+  if (!confirm('Archive this jobsite? It will no longer appear in the worker app.')) return;
+  try { await api('/jobsites/' + id, { method: 'PATCH', body: JSON.stringify({ active: false })}); await loadJobsites(); }
+  catch (e) { toast(e.message, 'error'); }
+};
+window.unarchiveJob = async function (id) {
+  try { await api('/jobsites/' + id, { method: 'PATCH', body: JSON.stringify({ active: true })}); await loadJobsites(); }
+  catch (e) { toast(e.message, 'error'); }
+};
+
+// ---- Tasks ----
+async function loadTasks() {
+  try {
+    const r = await api('/tasks'); state.tasks = r.tasks;
+    $('#tasksTable tbody').innerHTML = r.tasks.map(t => `
+      <tr>
+        <td>${esc(t.name)}</td>
+        <td>${esc(t.qb_service_item || '—')}</td>
+        <td>${t.active ? '<span class="pill success">active</span>' : '<span class="pill">archived</span>'}</td>
+        <td>
+          <button class="ghost" onclick="editTask(${t.id})">Edit</button>
+          ${t.active ? `<button class="ghost danger" onclick="archiveTask(${t.id})">Archive</button>` : `<button class="ghost" onclick="unarchiveTask(${t.id})">Unarchive</button>`}
+        </td>
+      </tr>
+    `).join('') || `<tr><td colspan="4" class="muted" style="text-align:center;padding:20px;">No tasks yet</td></tr>`;
+  } catch (e) { toast(e.message, 'error'); }
+}
+$('#taskAdd').addEventListener('click', () => {
+  modal(`
+    <h3>Add task / cost code</h3>
+    <label class="field">Name</label><input id="tName" type="text" />
+    <label class="field">QuickBooks service item (optional)</label><input id="tQb" type="text" />
+    <div class="modal-actions">
+      <button onclick="closeModal()">Cancel</button>
+      <button class="primary" id="tSave">Add</button>
+    </div>
+  `);
+  $('#tSave').addEventListener('click', async () => {
+    try {
+      const name = $('#tName').value.trim(); if (!name) return toast('Name required', 'error');
+      await api('/tasks', { method: 'POST', body: JSON.stringify({ name, qb_service_item: $('#tQb').value || null })});
+      toast('Added', 'success'); closeModal(); await loadTasks();
+    } catch (e) { toast(e.message, 'error'); }
+  });
+});
+window.editTask = async function (id) {
+  const t = state.tasks.find(x => x.id === id); if (!t) return;
+  modal(`
+    <h3>Edit ${esc(t.name)}</h3>
+    <label class="field">Name</label><input id="tName" type="text" value="${esc(t.name)}" />
+    <label class="field">QuickBooks service item</label><input id="tQb" type="text" value="${esc(t.qb_service_item || '')}" />
+    <div class="modal-actions">
+      <button onclick="closeModal()">Cancel</button>
+      <button class="primary" id="tSave">Save</button>
+    </div>
+  `);
+  $('#tSave').addEventListener('click', async () => {
+    try {
+      await api('/tasks/' + id, { method: 'PATCH', body: JSON.stringify({ name: $('#tName').value.trim(), qb_service_item: $('#tQb').value || null })});
+      toast('Saved', 'success'); closeModal(); await loadTasks();
+    } catch (e) { toast(e.message, 'error'); }
+  });
+};
+window.archiveTask = async function (id) {
+  if (!confirm('Archive this task?')) return;
+  try { await api('/tasks/' + id, { method: 'PATCH', body: JSON.stringify({ active: false })}); await loadTasks(); }
+  catch (e) { toast(e.message, 'error'); }
+};
+window.unarchiveTask = async function (id) {
+  try { await api('/tasks/' + id, { method: 'PATCH', body: JSON.stringify({ active: true })}); await loadTasks(); }
+  catch (e) { toast(e.message, 'error'); }
+};
+
+// ---- Reports ----
+async function loadReports() {
+  await ensureDimensions();
+  $('#rptWorker').innerHTML = state.workers.filter(w => w.active).map(w => `<option value="${w.id}">${esc(w.full_name)}</option>`).join('');
+  const today = Date.now();
+  const weekAgo = today - 7 * DAY;
+  for (const id of ['rptFrom','csvFrom','psFrom']) if (!$('#' + id).value) $('#' + id).value = toDateInput(weekAgo);
+  for (const id of ['rptTo','csvTo','psTo'])     if (!$('#' + id).value) $('#' + id).value = toDateInput(today);
+}
+
+$('#rptPdf').addEventListener('click', async () => {
+  try {
+    const workerId = Number($('#rptWorker').value);
+    const from = fromDateInput($('#rptFrom').value);
+    const to   = fromDateInput($('#rptTo').value, true);
+    const q = new URLSearchParams({ from, to, worker_id: workerId });
+    const r = await api('/entries?' + q.toString());
+    const worker = state.workers.find(w => w.id === workerId);
+    const completed = r.entries.filter(e => e.clock_out).sort((a, b) => a.clock_in - b.clock_in);
+    const totalHours = completed.reduce((a, e) => a + (e.clock_out - e.clock_in), 0) / 3600000;
+    const totalPay = (worker?.hourly_rate || 0) * totalHours;
+    await generateTimesheetPdf({
+      company: state.settings.company_name || 'Hadfield Properties LLC',
+      worker, from, to, entries: completed, totalHours, totalPay,
+    });
+  } catch (e) { toast(e.message, 'error'); }
+});
+
+$('#csvDownload').addEventListener('click', () => {
+  const from = fromDateInput($('#csvFrom').value);
+  const to   = fromDateInput($('#csvTo').value, true);
+  const tz = state.settings.timezone || 'America/Los_Angeles';
+  const url = `/api/admin/export/csv?from=${from}&to=${to}&tz=${encodeURIComponent(tz)}`;
+  const a = document.createElement('a');
+  a.href = url; a.download = ''; document.body.appendChild(a); a.click(); a.remove();
+});
+
+$('#psShow').addEventListener('click', async () => {
+  try {
+    const from = fromDateInput($('#psFrom').value);
+    const to   = fromDateInput($('#psTo').value, true);
+    const q = new URLSearchParams({ from, to });
+    const r = await api('/entries?' + q.toString());
+    const byWorker = {};
+    for (const e of r.entries) {
+      if (!e.clock_out) continue;
+      const id = e.worker_id;
+      byWorker[id] = byWorker[id] || { name: e.worker_name, ms: 0, count: 0 };
+      byWorker[id].ms += e.clock_out - e.clock_in;
+      byWorker[id].count++;
+    }
+    const rows = Object.values(byWorker).sort((a, b) => b.ms - a.ms);
+    const total = rows.reduce((a, b) => a + b.ms, 0);
+    $('#psResult').innerHTML = rows.length ? `
+      <table style="width:100%;margin-top:8px;">
+        <thead><tr><th>Worker</th><th>Shifts</th><th style="text-align:right;">Hours</th></tr></thead>
+        <tbody>
+          ${rows.map(r => `<tr>
+            <td>${esc(r.name)}</td>
+            <td>${r.count}</td>
+            <td style="text-align:right;font-variant-numeric:tabular-nums;">${fmtHours(r.ms)}</td>
+          </tr>`).join('')}
+          <tr><td colspan="2"><strong>Total</strong></td><td style="text-align:right;"><strong>${fmtHours(total)}</strong></td></tr>
+        </tbody>
+      </table>
+    ` : `<div class="muted">No completed shifts in this range.</div>`;
+  } catch (e) { toast(e.message, 'error'); }
+});
+
+// ---- PDF generation (pdf-lib) ----
+async function generateTimesheetPdf({ company, worker, from, to, entries, totalHours, totalPay }) {
+  const { PDFDocument, StandardFonts, rgb } = PDFLib;
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+
+  let page = doc.addPage([612, 792]); // US Letter (reassigned when a continuation page is added)
+  let y = 740;
+  const margin = 50;
+
+  page.drawText(company, { x: margin, y, size: 18, font: bold, color: rgb(0.95, 0.45, 0.09) });
+  y -= 22;
+  page.drawText('Timesheet', { x: margin, y, size: 14, font: bold, color: rgb(0.1, 0.1, 0.1) });
+  y -= 28;
+  page.drawText(`Worker: ${worker?.full_name || '—'}`, { x: margin, y, size: 11, font });
+  y -= 14;
+  page.drawText(`Period: ${fmtDate(from)} to ${fmtDate(to)}`, { x: margin, y, size: 11, font });
+  y -= 24;
+
+  // Header row
+  const cols = [
+    { k: 'Date',    x: margin },
+    { k: 'Jobsite', x: margin + 80 },
+    { k: 'Task',    x: margin + 200 },
+    { k: 'In',      x: margin + 300 },
+    { k: 'Out',     x: margin + 360 },
+    { k: 'Hours',   x: margin + 430 },
+  ];
+  cols.forEach(c => page.drawText(c.k, { x: c.x, y, size: 10, font: bold }));
+  y -= 6;
+  page.drawLine({ start: { x: margin, y }, end: { x: 562, y }, thickness: 0.8, color: rgb(0.4, 0.4, 0.4) });
+  y -= 12;
+
+  for (const e of entries) {
+    if (y < 80) {
+      page = doc.addPage([612, 792]); y = 740;
+      page.drawText('(continued)', { x: margin, y, size: 10, font });
+      y -= 20;
+    }
+    const hours = ((e.clock_out - e.clock_in) / 3600000).toFixed(2);
+    const inT = new Date(e.clock_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const outT = new Date(e.clock_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const row = [
+      fmtDate(e.clock_in),
+      (e.jobsite_name || '—').slice(0, 18),
+      (e.task_name || '—').slice(0, 14),
+      inT, outT, hours,
+    ];
+    row.forEach((v, i) => page.drawText(String(v), { x: cols[i].x, y, size: 10, font }));
+    y -= 14;
+  }
+
+  y -= 12;
+  page.drawLine({ start: { x: margin, y }, end: { x: 562, y }, thickness: 0.8 });
+  y -= 16;
+  page.drawText(`Total hours: ${totalHours.toFixed(2)}`, { x: margin, y, size: 12, font: bold });
+  if (totalPay > 0) {
+    y -= 14;
+    page.drawText(`Estimated pay: $${totalPay.toFixed(2)} @ $${worker.hourly_rate}/hr`, { x: margin, y, size: 11, font });
+  }
+  y -= 50;
+  page.drawLine({ start: { x: margin, y }, end: { x: 300, y }, thickness: 0.5 });
+  page.drawText('Employee signature', { x: margin, y: y - 12, size: 9, font, color: rgb(0.4, 0.4, 0.4) });
+  page.drawLine({ start: { x: 360, y }, end: { x: 540, y }, thickness: 0.5 });
+  page.drawText('Date', { x: 360, y: y - 12, size: 9, font, color: rgb(0.4, 0.4, 0.4) });
+
+  const bytes = await doc.save();
+  const blob = new Blob([bytes], { type: 'application/pdf' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `timesheet-${(worker?.full_name || 'worker').replace(/\s+/g, '_')}-${toDateInput(from)}-to-${toDateInput(to)}.pdf`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast('PDF downloaded', 'success');
+}
+
+// ---- Settings ----
+async function loadSettings() {
+  try {
+    const r = await api('/settings'); state.settings = r.settings;
+    $('#setCompany').value = r.settings.company_name || '';
+    $('#setTz').value = r.settings.timezone || 'America/Los_Angeles';
+    $('#setPeriod').value = r.settings.pay_period || 'weekly';
+    $('#setLongShift').value = r.settings.long_shift_hours || '12';
+  } catch (e) { toast(e.message, 'error'); }
+}
+$('#setSave').addEventListener('click', async () => {
+  try {
+    await api('/settings', { method: 'PATCH', body: JSON.stringify({
+      company_name: $('#setCompany').value.trim(),
+      timezone: $('#setTz').value.trim(),
+      pay_period: $('#setPeriod').value,
+      long_shift_hours: $('#setLongShift').value,
+    })});
+    toast('Saved', 'success'); await loadSettings();
+  } catch (e) { toast(e.message, 'error'); }
+});
+
+// ---- Boot ----
+async function boot() {
+  try {
+    const who = await api('/whoami');
+    $('#whoami').textContent = who.email || '—';
+  } catch { $('#whoami').textContent = 'not signed in'; }
+  try { const r = await api('/settings'); state.settings = r.settings; } catch {}
+  showPage((location.hash || '#dashboard').slice(1));
+}
+boot();
+</script>
+</body>
+</html>
