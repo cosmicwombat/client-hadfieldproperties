@@ -174,6 +174,7 @@
       <a href="#jobsites">Jobsites</a>
       <a href="#tasks">Tasks</a>
       <a href="#reports">Reports</a>
+      <a href="#qr">QR code</a>
       <a href="#settings">Settings</a>
     </nav>
     <div class="whoami" id="whoami">…</div>
@@ -311,6 +312,23 @@
       </div>
     </section>
 
+    <!-- QR code -->
+    <section id="page-qr" class="hide">
+      <h2 class="pageTitle">Worker QR code</h2>
+      <div class="card" style="max-width:640px;">
+        <p style="margin:0 0 18px;color:var(--muted);font-size:14px;line-height:1.5;">
+          Workers scan this with their phone camera to open the clock-in app.
+          You can show it on-screen, download the PNG, or print a full-page poster to post at jobsites.
+        </p>
+        <div id="qrBox" style="background:#fff;padding:20px;border-radius:8px;display:inline-block;min-height:120px;min-width:120px;"></div>
+        <div style="margin-top:14px;font-size:13px;color:var(--muted);word-break:break-all;" id="qrUrl"></div>
+        <div style="margin-top:18px;display:flex;gap:10px;flex-wrap:wrap;">
+          <button class="primary" id="qrPrint">🖨️ Print poster</button>
+          <button id="qrDownload">📥 Download PNG</button>
+        </div>
+      </div>
+    </section>
+
     <!-- Settings -->
     <section id="page-settings" class="hide">
       <h2 class="pageTitle">Settings</h2>
@@ -336,6 +354,7 @@
 <div id="toast" class="toast"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script>
 /* =============================================================================
  * Hadfield Admin Panel
@@ -402,7 +421,7 @@ async function api(path, opts = {}) {
 }
 
 // ---- routing ----
-const pages = ['dashboard', 'entries', 'workers', 'jobsites', 'tasks', 'reports', 'settings'];
+const pages = ['dashboard', 'entries', 'workers', 'jobsites', 'tasks', 'reports', 'qr', 'settings'];
 function showPage(p) {
   pages.forEach(k => $('#page-' + k).classList.toggle('hide', k !== p));
   $$('aside nav a').forEach(a => a.classList.toggle('active', a.getAttribute('href') === '#' + p));
@@ -413,6 +432,7 @@ function showPage(p) {
     jobsites: loadJobsites,
     tasks: loadTasks,
     reports: loadReports,
+    qr: loadQR,
     settings: loadSettings,
   };
   loaders[p] && loaders[p]();
@@ -991,6 +1011,115 @@ async function generateTimesheetPdf({ company, worker, from, to, entries, totalH
   a.click();
   URL.revokeObjectURL(url);
   toast('PDF downloaded', 'success');
+}
+
+// ---- QR code ----
+function workerAppUrl() { return location.origin + '/app/'; }
+
+async function loadQR() {
+  const url = workerAppUrl();
+  $('#qrUrl').textContent = url;
+  const box = $('#qrBox');
+  box.innerHTML = '';
+  if (typeof QRCode === 'undefined') {
+    box.innerHTML = '<div style="padding:40px;color:#b00;font-size:14px;">QR library failed to load. Hard-refresh the page.</div>';
+    return;
+  }
+  // qrcodejs auto-renders an img or canvas inside the target element
+  new QRCode(box, {
+    text: url,
+    width: 320,
+    height: 320,
+    correctLevel: QRCode.CorrectLevel.H,
+  });
+  // Make sure the handlers are wired (idempotent — safe to re-run on nav)
+  $('#qrPrint').onclick = printQRPoster;
+  $('#qrDownload').onclick = downloadQRPng;
+  // Pull in settings in the background so the poster has the right company name
+  if (!state.settings.company_name) {
+    try { const r = await api('/settings'); state.settings = r.settings; } catch {}
+  }
+}
+
+function downloadQRPng() {
+  const box = $('#qrBox');
+  const canvas = box.querySelector('canvas');
+  const img = box.querySelector('img');
+  const dataUrl = canvas ? canvas.toDataURL('image/png') : (img ? img.src : null);
+  if (!dataUrl) { toast('Could not extract QR image', 'error'); return; }
+  const a = document.createElement('a');
+  a.href = dataUrl;
+  a.download = 'hadfield-clockin-qr.png';
+  document.body.appendChild(a); a.click(); a.remove();
+  toast('QR downloaded', 'success');
+}
+
+function printQRPoster() {
+  const url = workerAppUrl();
+  const company = state.settings.company_name || 'Hadfield Properties';
+  const win = window.open('', '_blank', 'width=820,height=1060');
+  if (!win) { toast('Popup blocked — allow popups and retry', 'error'); return; }
+  // Build the printable page. Note: close tags in `</scr`+`ipt>` form so the
+  // browser doesn't terminate the enclosing script early.
+  const html = `<!doctype html>
+<html><head>
+<meta charset="utf-8"/>
+<title>Clock in QR — ${esc(company)}</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></scr`+`ipt>
+<style>
+  @page { size: letter; margin: 0.5in; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    color: #000; background: #fff;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 50px 20px; min-height: 100vh; text-align: center;
+  }
+  h1 { font-size: 46px; margin: 0 0 10px; font-weight: 700; }
+  .company { font-size: 26px; color: #555; margin: 0 0 32px; }
+  #qr { margin: 8px 0 30px; }
+  #qr img, #qr canvas { display: block; }
+  .instructions { max-width: 520px; font-size: 19px; line-height: 1.45; margin: 0 0 22px; color: #222; }
+  .step { margin: 8px 0; }
+  .url { font-size: 14px; color: #888; word-break: break-all; margin: 28px 0 0; max-width: 520px; }
+  .foot { margin-top: 40px; font-size: 11px; color: #aaa; letter-spacing: 0.05em; text-transform: uppercase; }
+  .print-btn {
+    position: fixed; top: 16px; right: 16px;
+    padding: 10px 18px; font-size: 14px; background: #f97316; color: #fff;
+    border: 0; border-radius: 8px; cursor: pointer; font-family: inherit;
+  }
+  @media print { .print-btn { display: none; } }
+</style>
+</head>
+<body>
+  <button class="print-btn" onclick="window.print()">🖨️ Print</button>
+  <h1>Scan to clock in / out</h1>
+  <div class="company">${esc(company)}</div>
+  <div id="qr"></div>
+  <div class="instructions">
+    <div class="step"><b>1.</b> Open your phone camera</div>
+    <div class="step"><b>2.</b> Point it at the QR code above</div>
+    <div class="step"><b>3.</b> Tap the link that appears</div>
+    <div class="step"><b>4.</b> Pick your name and enter your 4-digit PIN</div>
+  </div>
+  <div class="url">${esc(url)}</div>
+  <div class="foot">Hadfield Time Tracker</div>
+  <script>
+    function render() {
+      if (typeof QRCode === 'undefined') { setTimeout(render, 100); return; }
+      new QRCode(document.getElementById('qr'), {
+        text: ${JSON.stringify(url)},
+        width: 380, height: 380,
+        correctLevel: QRCode.CorrectLevel.H
+      });
+    }
+    render();
+  </scr`+`ipt>
+</body></html>`;
+  win.document.open();
+  win.document.write(html);
+  win.document.close();
 }
 
 // ---- Settings ----
