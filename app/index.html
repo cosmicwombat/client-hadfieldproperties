@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#f97316" />
+<title>Hadfield Properties — Time Clock</title>
+<link rel="manifest" href="manifest.json" />
+<style>
+  :root {
+    --bg:          #0f1115;
+    --surface:     #1a1d24;
+    --surface2:    #242832;
+    --border:      #323744;
+    --text:        #f1f5f9;
+    --muted:       #94a3b8;
+    --accent:      #f97316;
+    --accent-dark: #ea580c;
+    --success:     #22c55e;
+    --danger:      #ef4444;
+    --radius:      14px;
+    --sans:        -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; background: var(--bg); color: var(--text); font-family: var(--sans); }
+  body { overscroll-behavior: none; -webkit-tap-highlight-color: transparent; }
+
+  .shell {
+    max-width: 480px; margin: 0 auto; min-height: 100vh;
+    display: flex; flex-direction: column;
+    padding: env(safe-area-inset-top) 16px env(safe-area-inset-bottom);
+  }
+  header.top {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 0 12px;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .logo {
+    width: 40px; height: 40px; border-radius: 10px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-dark));
+    display: grid; place-items: center; font-size: 22px;
+  }
+  .brand h1 { font-size: 17px; margin: 0; font-weight: 600; }
+  .brand p  { font-size: 12px; margin: 0; color: var(--muted); }
+
+  #netbadge {
+    font-size: 11px; padding: 4px 10px; border-radius: 999px;
+    background: var(--surface2); color: var(--muted); border: 1px solid var(--border);
+  }
+  #netbadge.offline { color: var(--danger); border-color: var(--danger); }
+  #netbadge.queued { color: var(--accent); border-color: var(--accent); }
+
+  main { flex: 1; padding: 8px 0 20px; }
+  .screen { display: none; }
+  .screen.active { display: block; }
+
+  h2.title { font-size: 22px; margin: 4px 0 16px; }
+  .muted { color: var(--muted); }
+
+  /* Worker list */
+  .searchbar {
+    width: 100%; padding: 14px 16px; border-radius: var(--radius);
+    background: var(--surface); color: var(--text);
+    border: 1px solid var(--border); font-size: 16px; margin-bottom: 12px;
+  }
+  .worker-list { display: flex; flex-direction: column; gap: 10px; }
+  .worker-row {
+    display: flex; align-items: center; gap: 14px;
+    padding: 14px 16px; background: var(--surface);
+    border: 1px solid var(--border); border-radius: var(--radius);
+    min-height: 64px; cursor: pointer;
+    transition: transform 80ms ease, border-color 80ms ease;
+  }
+  .worker-row:active { transform: scale(0.98); border-color: var(--accent); }
+  .avatar {
+    width: 44px; height: 44px; border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent), var(--accent-dark));
+    display: grid; place-items: center; font-weight: 700; color: #fff; font-size: 16px;
+    flex-shrink: 0;
+  }
+  .worker-row .name { font-size: 17px; font-weight: 500; }
+
+  /* PIN keypad */
+  .pin-display {
+    display: flex; justify-content: center; gap: 14px; margin: 22px 0 26px;
+  }
+  .pin-dot {
+    width: 18px; height: 18px; border-radius: 50%;
+    background: var(--surface2); border: 1px solid var(--border);
+    transition: background 120ms ease;
+  }
+  .pin-dot.filled { background: var(--accent); border-color: var(--accent); }
+  .keypad {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;
+    max-width: 320px; margin: 0 auto;
+  }
+  .key {
+    padding: 20px 0; font-size: 26px; font-weight: 500;
+    background: var(--surface); border: 1px solid var(--border); color: var(--text);
+    border-radius: var(--radius); cursor: pointer; user-select: none;
+    transition: transform 60ms ease, background 80ms ease;
+  }
+  .key:active { transform: scale(0.95); background: var(--surface2); }
+  .key.accent { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+  .shake { animation: shake 0.4s; }
+  @keyframes shake {
+    10%, 90% { transform: translateX(-2px); }
+    20%, 80% { transform: translateX(4px); }
+    30%, 50%, 70% { transform: translateX(-6px); }
+    40%, 60% { transform: translateX(6px); }
+  }
+
+  /* Clock screen */
+  .status-card {
+    padding: 20px; border-radius: var(--radius);
+    background: var(--surface); border: 1px solid var(--border);
+    margin-bottom: 16px;
+  }
+  .status-card .label { color: var(--muted); font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; }
+  .status-card .value { font-size: 20px; font-weight: 600; margin-top: 6px; }
+  .status-card.clocked-in { border-color: var(--success); }
+  .status-card .dot {
+    display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+    background: var(--success); margin-right: 8px; vertical-align: middle;
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+  label.field { display: block; font-size: 13px; color: var(--muted); margin: 14px 0 6px; }
+  select, textarea, input[type="text"] {
+    width: 100%; padding: 14px 14px; border-radius: var(--radius);
+    background: var(--surface); color: var(--text);
+    border: 1px solid var(--border); font-size: 16px; font-family: inherit;
+  }
+  textarea { resize: vertical; min-height: 60px; }
+
+  button.big {
+    width: 100%; padding: 20px; border-radius: var(--radius);
+    font-size: 19px; font-weight: 700; border: 0; cursor: pointer;
+    margin-top: 18px; min-height: 64px;
+    transition: transform 80ms ease, filter 80ms ease;
+  }
+  button.big:active { transform: scale(0.99); }
+  button.big.clock-in  { background: var(--success); color: #07140b; }
+  button.big.clock-out { background: var(--danger); color: #fff; }
+  button.big:disabled  { opacity: 0.55; cursor: not-allowed; }
+
+  button.ghost {
+    background: transparent; color: var(--muted); border: 0;
+    font-size: 15px; padding: 10px; cursor: pointer; margin-top: 8px;
+    width: 100%;
+  }
+  button.ghost:hover { color: var(--text); }
+
+  .toast {
+    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+    background: var(--surface); border: 1px solid var(--border);
+    color: var(--text); padding: 14px 18px; border-radius: var(--radius);
+    font-size: 14px; box-shadow: 0 8px 20px rgba(0, 0, 0, 0.5);
+    opacity: 0; pointer-events: none; transition: opacity 180ms ease, transform 180ms ease;
+    z-index: 100; max-width: 90%;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(-4px); }
+  .toast.success { border-color: var(--success); }
+  .toast.error { border-color: var(--danger); }
+
+  .admin-link {
+    text-align: center; color: var(--muted); font-size: 12px;
+    padding: 12px 0 0; text-decoration: none; display: block;
+  }
+  .admin-link a { color: var(--muted); text-decoration: none; }
+
+  .queued-banner {
+    background: #3a2f17; border: 1px solid var(--accent);
+    color: var(--accent); padding: 10px 14px; border-radius: var(--radius);
+    font-size: 13px; margin-bottom: 12px; display: none;
+  }
+  .queued-banner.show { display: block; }
+</style>
+</head>
+<body>
+<div class="shell">
+  <header class="top">
+    <div class="brand">
+      <div class="logo">🔨</div>
+      <div>
+        <h1>Hadfield Properties</h1>
+        <p>Time Clock</p>
+      </div>
+    </div>
+    <span id="netbadge">online</span>
+  </header>
+
+  <div id="queuedBanner" class="queued-banner">
+    <span id="queuedCount">0</span> punch(es) queued — will sync when online
+  </div>
+
+  <main>
+    <!-- Screen 1: Pick your name -->
+    <section id="screen-name" class="screen active">
+      <h2 class="title">Who are you?</h2>
+      <input id="search" class="searchbar" type="search" placeholder="Search name…" autocomplete="off" />
+      <div id="workerList" class="worker-list"></div>
+    </section>
+
+    <!-- Screen 2: PIN entry -->
+    <section id="screen-pin" class="screen">
+      <h2 class="title" id="pinTitle">Enter your PIN</h2>
+      <div id="pinDisplay" class="pin-display">
+        <div class="pin-dot"></div><div class="pin-dot"></div>
+        <div class="pin-dot"></div><div class="pin-dot"></div>
+      </div>
+      <div class="keypad" id="keypad"></div>
+      <button class="ghost" id="backFromPin">← Pick a different name</button>
+    </section>
+
+    <!-- Screen 3: Clock in/out -->
+    <section id="screen-clock" class="screen">
+      <h2 class="title" id="hello">Welcome</h2>
+      <div id="statusCard" class="status-card">
+        <div class="label">Status</div>
+        <div class="value" id="statusValue">Not clocked in</div>
+      </div>
+
+      <div id="clockInForm">
+        <label class="field" for="jobsite">Jobsite</label>
+        <select id="jobsite"></select>
+
+        <label class="field" for="task">Task / cost code</label>
+        <select id="task"></select>
+
+        <label class="field" for="notes">Note (optional)</label>
+        <textarea id="notes" placeholder="Short note…" maxlength="500"></textarea>
+
+        <button class="big clock-in" id="clockInBtn">CLOCK IN</button>
+      </div>
+
+      <div id="clockOutForm" style="display:none;">
+        <button class="big clock-out" id="clockOutBtn">CLOCK OUT</button>
+      </div>
+
+      <button class="ghost" id="logoutBtn">← Finish (next person)</button>
+    </section>
+  </main>
+
+  <a class="admin-link" href="/admin/">Admin →</a>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script>
+/* =============================================================================
+ * Hadfield Properties Time Clock — worker PWA
+ *
+ * Three screens: pick name → enter PIN → clock in/out. Offline-capable; a
+ * punch made while offline is queued in IndexedDB and replayed when online.
+ * All API calls go to /api/* (same-origin, served by hadfield-worker).
+ * ============================================================================= */
+
+const API = '/api';
+const state = {
+  workers: [],
+  context: { jobsites: [], tasks: [] },
+  selected: null,
+  pin: '',
+  session: null,   // { worker_id, full_name }
+  activeEntry: null,
+};
+
+// ---- tiny helpers ----
+const $ = sel => document.querySelector(sel);
+const $$ = sel => [...document.querySelectorAll(sel)];
+function show(id) {
+  $$('.screen').forEach(s => s.classList.remove('active'));
+  $('#' + id).classList.add('active');
+}
+function initials(name) {
+  return (name || '?')
+    .split(/\s+/).filter(Boolean).slice(0, 2)
+    .map(s => s[0].toUpperCase()).join('');
+}
+function fmtTime(ts) {
+  return new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+let toastTimer;
+function toast(msg, kind = '') {
+  const t = $('#toast');
+  t.textContent = msg;
+  t.className = 'toast show ' + kind;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 2600);
+}
+async function api(path, opts = {}) {
+  const r = await fetch(API + path, {
+    credentials: 'include',
+    headers: { 'content-type': 'application/json' },
+    ...opts,
+  });
+  if (!r.ok) {
+    let body = {};
+    try { body = await r.json(); } catch {}
+    throw new Error(body.error || ('HTTP ' + r.status));
+  }
+  return r.json();
+}
+
+// ---- IndexedDB offline queue ----
+const DB_NAME = 'hadfield-queue';
+const STORE   = 'punches';
+function openDb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(STORE)) {
+        db.createObjectStore(STORE, { keyPath: 'id', autoIncrement: true });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function queuePunch(kind, payload) {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    const rec = { kind, payload, ts: Date.now() };
+    tx.objectStore(STORE).add(rec);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+async function readQueue() {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readonly');
+    const req = tx.objectStore(STORE).getAll();
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function deleteFromQueue(id) {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).delete(id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+async function refreshQueueBadge() {
+  const q = await readQueue();
+  const banner = $('#queuedBanner');
+  const badge = $('#netbadge');
+  if (q.length > 0) {
+    $('#queuedCount').textContent = q.length;
+    banner.classList.add('show');
+    if (navigator.onLine) { badge.textContent = 'syncing…'; badge.className = 'queued'; }
+  } else {
+    banner.classList.remove('show');
+    updateNetBadge();
+  }
+}
+async function flushQueue() {
+  if (!navigator.onLine) return;
+  const q = await readQueue();
+  for (const rec of q) {
+    try {
+      await api('/worker/' + rec.kind, { method: 'POST', body: JSON.stringify(rec.payload) });
+      await deleteFromQueue(rec.id);
+    } catch (e) {
+      // 401 on server side means the original session expired — drop the record so we don't
+      // replay forever. A real session conflict (409 already clocked in) also drops.
+      if (/401|403|404|409/.test(e.message)) await deleteFromQueue(rec.id);
+      break; // stop on any error so we retry later rather than thrashing
+    }
+  }
+  await refreshQueueBadge();
+}
+
+function updateNetBadge() {
+  const b = $('#netbadge');
+  if (!navigator.onLine) { b.textContent = 'offline'; b.className = 'offline'; }
+  else { b.textContent = 'online'; b.className = ''; }
+}
+
+// ---- GPS (silent fail) ----
+function getGps(timeoutMs = 6000) {
+  return new Promise(resolve => {
+    if (!('geolocation' in navigator)) return resolve({});
+    const t = setTimeout(() => resolve({}), timeoutMs);
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        clearTimeout(t);
+        resolve({
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          accuracy: pos.coords.accuracy,
+        });
+      },
+      () => { clearTimeout(t); resolve({}); },
+      { enableHighAccuracy: false, timeout: timeoutMs, maximumAge: 30000 },
+    );
+  });
+}
+
+// ---- Screen 1: pick name ----
+function renderWorkers(filter = '') {
+  const host = $('#workerList');
+  const needle = filter.trim().toLowerCase();
+  const rows = state.workers.filter(w => !needle || w.full_name.toLowerCase().includes(needle));
+  if (!rows.length) {
+    host.innerHTML = '<div class="muted" style="padding:24px 8px;text-align:center;">No workers set up yet. Admin needs to add workers.</div>';
+    return;
+  }
+  host.innerHTML = rows.map(w => `
+    <div class="worker-row" data-id="${w.id}">
+      <div class="avatar">${initials(w.full_name)}</div>
+      <div class="name">${w.full_name}</div>
+    </div>
+  `).join('');
+  host.querySelectorAll('.worker-row').forEach(r => {
+    r.addEventListener('click', () => {
+      const id = Number(r.dataset.id);
+      state.selected = state.workers.find(w => w.id === id);
+      state.pin = '';
+      renderPin();
+      $('#pinTitle').textContent = `PIN for ${state.selected.full_name}`;
+      show('screen-pin');
+    });
+  });
+}
+
+// ---- Screen 2: PIN keypad ----
+function renderPin() {
+  $$('.pin-dot').forEach((d, i) => d.classList.toggle('filled', i < state.pin.length));
+}
+function buildKeypad() {
+  const host = $('#keypad');
+  host.innerHTML = '';
+  const order = ['1','2','3','4','5','6','7','8','9','','0','⌫'];
+  order.forEach(k => {
+    if (k === '') { host.appendChild(document.createElement('div')); return; }
+    const b = document.createElement('button');
+    b.className = 'key';
+    b.textContent = k;
+    b.addEventListener('click', () => pressKey(k));
+    host.appendChild(b);
+  });
+}
+async function pressKey(k) {
+  if (k === '⌫') { state.pin = state.pin.slice(0, -1); renderPin(); return; }
+  if (state.pin.length >= 4) return;
+  state.pin += k;
+  renderPin();
+  if (state.pin.length === 4) await submitPin();
+}
+async function submitPin() {
+  try {
+    const out = await api('/worker/verify-pin', {
+      method: 'POST',
+      body: JSON.stringify({ worker_id: state.selected.id, pin: state.pin }),
+    });
+    state.session = out;
+    $('#hello').textContent = `Hi, ${out.full_name}`;
+    state.pin = '';
+    await loadClockScreen();
+    show('screen-clock');
+  } catch (e) {
+    // shake and clear
+    const d = $('#pinDisplay');
+    d.classList.remove('shake'); void d.offsetWidth; d.classList.add('shake');
+    state.pin = '';
+    renderPin();
+    toast(e.message || 'Wrong PIN', 'error');
+  }
+}
+
+// ---- Screen 3: clock in/out ----
+async function loadClockScreen() {
+  try {
+    const ctx = await api('/worker/context');
+    state.context = { jobsites: ctx.jobsites, tasks: ctx.tasks };
+    $('#jobsite').innerHTML = ctx.jobsites.map(j => `<option value="${j.id}">${j.name}</option>`).join('') || '<option value="">(none — admin must add)</option>';
+    $('#task').innerHTML    = ctx.tasks.map(t   => `<option value="${t.id}">${t.name}</option>`).join('')   || '<option value="">(none — admin must add)</option>';
+  } catch (e) {
+    toast('Could not load jobsites: ' + e.message, 'error');
+  }
+  try {
+    const s = await api('/worker/status');
+    state.activeEntry = s.active_entry;
+  } catch {
+    state.activeEntry = null;
+  }
+  renderClockState();
+}
+
+function renderClockState() {
+  const card = $('#statusCard');
+  const val = $('#statusValue');
+  if (state.activeEntry) {
+    card.classList.add('clocked-in');
+    const since = fmtTime(state.activeEntry.clock_in);
+    const at = state.activeEntry.jobsite_name ? ' at ' + state.activeEntry.jobsite_name : '';
+    val.innerHTML = `<span class="dot"></span>Clocked in since ${since}${at}`;
+    $('#clockInForm').style.display = 'none';
+    $('#clockOutForm').style.display = 'block';
+  } else {
+    card.classList.remove('clocked-in');
+    val.textContent = 'Not clocked in';
+    $('#clockInForm').style.display = 'block';
+    $('#clockOutForm').style.display = 'none';
+  }
+}
+
+async function doClockIn() {
+  const btn = $('#clockInBtn');
+  btn.disabled = true; btn.textContent = 'CLOCKING IN…';
+  const payload = {
+    jobsite_id: Number($('#jobsite').value),
+    task_id:    Number($('#task').value),
+    notes:      $('#notes').value.trim() || null,
+    ...(await getGps()),
+  };
+  if (!payload.jobsite_id || !payload.task_id) {
+    btn.disabled = false; btn.textContent = 'CLOCK IN';
+    toast('Pick a jobsite and task', 'error');
+    return;
+  }
+  try {
+    if (!navigator.onLine) throw Object.assign(new Error('offline'), { offline: true });
+    await api('/worker/clock-in', { method: 'POST', body: JSON.stringify(payload) });
+    toast(`Clocked in at ${fmtTime(Date.now())} — have a good day`, 'success');
+  } catch (e) {
+    if (e.offline || !navigator.onLine) {
+      await queuePunch('clock-in', payload);
+      toast('Queued — will sync when online', '');
+      await refreshQueueBadge();
+    } else {
+      toast(e.message || 'Clock-in failed', 'error');
+      btn.disabled = false; btn.textContent = 'CLOCK IN';
+      return;
+    }
+  }
+  setTimeout(() => logout(true), 3000);
+}
+
+async function doClockOut() {
+  const btn = $('#clockOutBtn');
+  btn.disabled = true; btn.textContent = 'CLOCKING OUT…';
+  const payload = { ...(await getGps()) };
+  try {
+    if (!navigator.onLine) throw Object.assign(new Error('offline'), { offline: true });
+    await api('/worker/clock-out', { method: 'POST', body: JSON.stringify(payload) });
+    toast(`Clocked out at ${fmtTime(Date.now())}`, 'success');
+  } catch (e) {
+    if (e.offline || !navigator.onLine) {
+      await queuePunch('clock-out', payload);
+      toast('Queued — will sync when online', '');
+      await refreshQueueBadge();
+    } else {
+      toast(e.message || 'Clock-out failed', 'error');
+      btn.disabled = false; btn.textContent = 'CLOCK OUT';
+      return;
+    }
+  }
+  setTimeout(() => logout(true), 3000);
+}
+
+// ---- logout / back to name screen ----
+async function logout(silent = false) {
+  try { await api('/worker/logout', { method: 'POST' }); } catch {}
+  state.session = null; state.selected = null; state.activeEntry = null;
+  state.pin = '';
+  $('#notes').value = '';
+  $('#search').value = '';
+  renderWorkers();
+  show('screen-name');
+  if (!silent) toast('Done', '');
+}
+
+// ---- boot ----
+async function loadWorkers() {
+  try {
+    const r = await api('/worker/workers');
+    state.workers = r.workers || [];
+    renderWorkers();
+  } catch (e) {
+    $('#workerList').innerHTML = `<div class="muted" style="padding:24px 8px;text-align:center;">Could not load workers. Check your connection.</div>`;
+  }
+}
+
+async function boot() {
+  buildKeypad();
+  updateNetBadge();
+  await loadWorkers();
+  await refreshQueueBadge();
+  flushQueue();
+
+  $('#search').addEventListener('input', e => renderWorkers(e.target.value));
+  $('#backFromPin').addEventListener('click', () => { state.pin = ''; renderPin(); show('screen-name'); });
+  $('#clockInBtn').addEventListener('click', doClockIn);
+  $('#clockOutBtn').addEventListener('click', doClockOut);
+  $('#logoutBtn').addEventListener('click', () => logout());
+
+  window.addEventListener('online', () => { updateNetBadge(); flushQueue(); });
+  window.addEventListener('offline', updateNetBadge);
+  setInterval(flushQueue, 30_000);
+
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('./sw.js').catch(() => {});
+  }
+}
+boot();
+</script>
+</body>
+</html>
