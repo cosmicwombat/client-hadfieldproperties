@@ -1,0 +1,36 @@
+name = "hadfield-worker"
+main = "worker.js"
+compatibility_date = "2024-09-23"
+# ── Route Pattern ────────────────────────────────────────────────────────────
+# Serves the API same-origin with the frontend at hadfieldproperties.appsforhire.app.
+# This keeps CF Access cookies working natively for the /admin/* routes.
+[[routes]]
+pattern = "hadfieldproperties.appsforhire.app/api/*"
+zone_name = "appsforhire.app"
+
+[[routes]]
+pattern = "hadfieldproperties.appsforhire.app/health"
+zone_name = "appsforhire.app"
+
+# ── D1 Database ──────────────────────────────────────────────────────────────
+[[d1_databases]]
+binding = "HADFIELD_DB"
+database_name = "hadfield-db"
+# database_id filled in after `wrangler d1 create hadfield-db`
+database_id = "69c25812-4379-4ae0-a132-a10e2ba1b788"
+
+# ── KV Namespace (sessions, rate limits) ─────────────────────────────────────
+[[kv_namespaces]]
+binding = "HADFIELD_KV"
+id = "a77e93e3af2e401bb0521b315c8020fb"
+
+# ── R2 Bucket (logos, optional worker photos) ────────────────────────────────
+[[r2_buckets]]
+binding = "HADFIELD_ASSETS"
+bucket_name = "hadfield-assets"
+
+# ── Secrets (set via `wrangler secret put <NAME> --name hadfield-worker`) ────
+# WORKER_SESSION_SECRET — HMAC key for worker_session JWTs
+# CF_ACCESS_AUD         — Cloudflare Access application AUD tag
+# CF_ACCESS_TEAM        — Cloudflare Access team domain (e.g. cosmicwombat.cloudflareaccess.com)
+# ADMIN_EMAILS          — Comma-separated allowlist (belt-and-suspenders alongside CF Access)
