@@ -138,32 +138,40 @@ async function getJwks(teamDomain) {
 }
 
 async function verifyAccessJwt(token, env) {
-  const team = env.CF_ACCESS_TEAM;
-  const aud = env.CF_ACCESS_AUD;
-  if (!team || !aud) return null;
-  const [h, b, s] = token.split('.');
-  if (!h || !b || !s) return null;
-  let header, payload;
   try {
-    header = JSON.parse(dec.decode(b64urlDecode(h)));
-    payload = JSON.parse(dec.decode(b64urlDecode(b)));
-  } catch { return null; }
-  if (payload.aud !== aud && !(Array.isArray(payload.aud) && payload.aud.includes(aud))) return null;
-  if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return null;
+    let team = env.CF_ACCESS_TEAM;
+    const aud = env.CF_ACCESS_AUD;
+    if (!team || !aud) return { _reason: 'missing CF_ACCESS_TEAM or CF_ACCESS_AUD' };
+    // Be forgiving about accidental https:// prefix or trailing slash
+    team = team.replace(/^https?:\/\//, '').replace(/\/+$/, '').trim();
+    const [h, b, s] = token.split('.');
+    if (!h || !b || !s) return { _reason: 'token not a JWT (wrong number of segments)' };
+    let header, payload;
+    try {
+      header = JSON.parse(dec.decode(b64urlDecode(h)));
+      payload = JSON.parse(dec.decode(b64urlDecode(b)));
+    } catch { return { _reason: 'could not decode JWT header/payload' }; }
+    if (payload.aud !== aud && !(Array.isArray(payload.aud) && payload.aud.includes(aud))) {
+      return { _reason: `aud mismatch (token aud=${JSON.stringify(payload.aud)}, expected ${aud})` };
+    }
+    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return { _reason: 'token expired' };
 
-  const jwks = await getJwks(team);
-  const jwk = jwks.find(k => k.kid === header.kid);
-  if (!jwk) return null;
-  const key = await crypto.subtle.importKey(
-    'jwk', jwk,
-    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']
-  );
-  const ok = await crypto.subtle.verify(
-    'RSASSA-PKCS1-v1_5', key,
-    b64urlDecode(s), enc.encode(`${h}.${b}`)
-  );
-  if (!ok) return null;
-  return payload;
+    const jwks = await getJwks(team);
+    const jwk = jwks.find(k => k.kid === header.kid);
+    if (!jwk) return { _reason: `no matching jwk for kid ${header.kid}` };
+    const key = await crypto.subtle.importKey(
+      'jwk', jwk,
+      { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']
+    );
+    const ok = await crypto.subtle.verify(
+      'RSASSA-PKCS1-v1_5', key,
+      b64urlDecode(s), enc.encode(`${h}.${b}`)
+    );
+    if (!ok) return { _reason: 'signature did not verify' };
+    return payload;
+  } catch (e) {
+    return { _reason: `verify threw: ${e.message || e}` };
+  }
 }
 
 // ─── Auth guards ─────────────────────────────────────────────────────────────
@@ -181,6 +189,7 @@ async function requireAdmin(req, env) {
   if (!token) return { ok: false, status: 401, msg: 'No CF Access token' };
   const payload = await verifyAccessJwt(token, env);
   if (!payload) return { ok: false, status: 401, msg: 'Invalid CF Access token' };
+  if (payload._reason) return { ok: false, status: 401, msg: `Invalid CF Access token: ${payload._reason}` };
   const email = (payload.email || payload.identity_nonce || '').toLowerCase();
   const allowed = (env.ADMIN_EMAILS || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
   if (allowed.length > 0 && !allowed.includes(email)) {
