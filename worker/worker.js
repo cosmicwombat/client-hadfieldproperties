@@ -7,8 +7,13 @@
 //   POST /api/worker/logout             — clear worker_session cookie
 //   GET  /api/worker/context            — list jobsites + tasks (auth)
 //   GET  /api/worker/status             — current clock status for session worker (auth)
-//   POST /api/worker/clock-in           — clock in (auth)
-//   POST /api/worker/clock-out          — clock out (auth)
+//   GET  /api/worker/today              — today's in-progress/unfinished entry for review screen (auth)
+//   POST /api/worker/clock-in           — clock in (auth) — starts the daily row
+//   POST /api/worker/lunch-out          — punch out for lunch (auth)
+//   POST /api/worker/lunch-in           — punch back from lunch (auth)
+//   POST /api/worker/clock-out          — clock out (auth) — day stays editable by worker until finish
+//   PATCH /api/worker/today/times       — worker self-edit of clock_in/lunch_out/lunch_in/clock_out (auth)
+//   POST /api/worker/today/finish       — lock today's row for worker (admin can still edit)
 //
 //   Admin routes (Cloudflare Access JWT required):
 //   GET  /api/admin/whoami
@@ -210,11 +215,54 @@ async function requireAdmin(req, env) {
 
 // ─── DB helpers ──────────────────────────────────────────────────────────────
 
+// Currently-open entry (clock_in set, clock_out not yet set). Used by punch routes
+// that need to know where in the day the worker is.
 async function pickWorkerActive(env, workerId) {
   const r = await env.HADFIELD_DB
-    .prepare('SELECT id, clock_in FROM time_entries WHERE worker_id = ? AND clock_out IS NULL ORDER BY clock_in DESC LIMIT 1')
+    .prepare('SELECT * FROM time_entries WHERE worker_id = ? AND clock_out IS NULL ORDER BY clock_in DESC LIMIT 1')
     .bind(workerId).first();
   return r || null;
+}
+
+// Today's row from the worker's perspective: the most recent row the worker
+// has NOT yet tapped "Finish Day" on. May be in any state (pre-clock-in does not
+// count — no row exists yet). Covers both "still working" and "clocked out but
+// reviewing" states.
+async function pickWorkerUnfinished(env, workerId) {
+  const r = await env.HADFIELD_DB
+    .prepare('SELECT * FROM time_entries WHERE worker_id = ? AND worker_finished_day IS NULL ORDER BY clock_in DESC LIMIT 1')
+    .bind(workerId).first();
+  return r || null;
+}
+
+// Derive a single state label so the frontend has one source of truth.
+//   IDLE              — no unfinished row; worker has not clocked in yet today
+//   WORKING_PRE_LUNCH — clocked in, no lunch yet
+//   ON_LUNCH          — lunch_out set, lunch_in not set
+//   AFTER_LUNCH       — lunch_in set, clock_out not set
+//   REVIEWING         — clock_out set, worker has not yet tapped Finish Day
+//   FINISHED          — worker tapped Finish Day (row is locked to worker, admin may still edit)
+function dayState(entry) {
+  if (!entry) return 'IDLE';
+  if (entry.worker_finished_day) return 'FINISHED';
+  if (!entry.clock_out) {
+    if (entry.lunch_out && !entry.lunch_in) return 'ON_LUNCH';
+    if (entry.lunch_in) return 'AFTER_LUNCH';
+    return 'WORKING_PRE_LUNCH';
+  }
+  return 'REVIEWING';
+}
+
+// Compute net worked ms for an entry (subtracts lunch if both lunch punches set).
+// Used in CSV export + the review screen's running total.
+function netWorkedMs(entry) {
+  if (!entry || !entry.clock_in) return 0;
+  const end = entry.clock_out || Date.now();
+  const gross = Math.max(0, end - entry.clock_in);
+  if (entry.lunch_out && entry.lunch_in && entry.lunch_in > entry.lunch_out) {
+    return Math.max(0, gross - (entry.lunch_in - entry.lunch_out));
+  }
+  return gross;
 }
 
 // ─── Stripe helpers ──────────────────────────────────────────────────────────
@@ -412,16 +460,33 @@ async function workerContext(req, env) {
 async function workerStatus(req, env) {
   const sess = await requireWorkerSession(req, env);
   if (!sess) return err(401, 'Session expired');
-  const active = await env.HADFIELD_DB.prepare(
-    `SELECT e.id, e.clock_in, e.notes,
+  // Return the worker's unfinished day (if any) — may be still-working or reviewing.
+  const entry = await env.HADFIELD_DB.prepare(
+    `SELECT e.*,
             j.name AS jobsite_name, t.name AS task_name
        FROM time_entries e
        LEFT JOIN jobsites j ON j.id = e.jobsite_id
        LEFT JOIN tasks t    ON t.id = e.task_id
-      WHERE e.worker_id = ? AND e.clock_out IS NULL
+      WHERE e.worker_id = ? AND e.worker_finished_day IS NULL
       ORDER BY e.clock_in DESC LIMIT 1`
   ).bind(sess.worker_id).first();
-  return json({ worker: sess, active_entry: active || null });
+  return json({
+    worker: sess,
+    state: dayState(entry),
+    entry: entry || null,
+    net_worked_ms: netWorkedMs(entry),
+    // active_entry kept for backward compat with older app versions until next deploy.
+    active_entry: entry && !entry.clock_out
+      ? { id: entry.id, clock_in: entry.clock_in, notes: entry.notes,
+          jobsite_name: entry.jobsite_name, task_name: entry.task_name }
+      : null,
+  });
+}
+
+// Dedicated endpoint for the end-of-day review screen (same payload shape as
+// workerStatus — separate path so we can evolve them independently).
+async function workerToday(req, env) {
+  return workerStatus(req, env);
 }
 
 async function workerClockIn(req, env) {
@@ -431,9 +496,16 @@ async function workerClockIn(req, env) {
   const { jobsite_id, task_id, notes, lat, lng, accuracy } = body;
   if (!jobsite_id || !task_id) return err(400, 'jobsite_id and task_id are required');
 
-  // Refuse if already clocked in
-  const open = await pickWorkerActive(env, sess.worker_id);
-  if (open) return err(409, 'Already clocked in');
+  // Refuse if they already have a row in progress (unfinished day — any state).
+  // This prevents a worker who forgot to Finish Day yesterday from accidentally
+  // starting a fresh row today; they'll see their old day on the review screen
+  // and must Finish it (or admin edits/closes it) before starting a new one.
+  const unfinished = await pickWorkerUnfinished(env, sess.worker_id);
+  if (unfinished) {
+    return err(409, unfinished.clock_out
+      ? 'You have an unfinished day on the review screen — tap Finish Day first'
+      : 'Already clocked in');
+  }
 
   const now = Date.now();
   const ins = await env.HADFIELD_DB.prepare(
@@ -449,6 +521,46 @@ async function workerClockIn(req, env) {
   return json({ ok: true, entry_id: ins.meta.last_row_id, clock_in: now });
 }
 
+async function workerLunchOut(req, env) {
+  const sess = await requireWorkerSession(req, env);
+  if (!sess) return err(401, 'Session expired');
+  const body = await req.json().catch(() => ({}));
+  const { lat, lng, accuracy } = body;
+
+  const open = await pickWorkerActive(env, sess.worker_id);
+  if (!open) return err(409, 'Not clocked in');
+  if (open.lunch_out && !open.lunch_in) return err(409, 'Already on lunch');
+  if (open.lunch_out && open.lunch_in) return err(409, 'Lunch already taken today');
+
+  const now = Date.now();
+  await env.HADFIELD_DB.prepare(
+    `UPDATE time_entries
+        SET lunch_out = ?, lunch_out_lat = ?, lunch_out_lng = ?, lunch_out_accuracy = ?
+      WHERE id = ?`
+  ).bind(now, lat ?? null, lng ?? null, accuracy ?? null, open.id).run();
+  return json({ ok: true, entry_id: open.id, lunch_out: now });
+}
+
+async function workerLunchIn(req, env) {
+  const sess = await requireWorkerSession(req, env);
+  if (!sess) return err(401, 'Session expired');
+  const body = await req.json().catch(() => ({}));
+  const { lat, lng, accuracy } = body;
+
+  const open = await pickWorkerActive(env, sess.worker_id);
+  if (!open) return err(409, 'Not clocked in');
+  if (!open.lunch_out) return err(409, 'Not on lunch (tap Out for Lunch first)');
+  if (open.lunch_in) return err(409, 'Already back from lunch');
+
+  const now = Date.now();
+  await env.HADFIELD_DB.prepare(
+    `UPDATE time_entries
+        SET lunch_in = ?, lunch_in_lat = ?, lunch_in_lng = ?, lunch_in_accuracy = ?
+      WHERE id = ?`
+  ).bind(now, lat ?? null, lng ?? null, accuracy ?? null, open.id).run();
+  return json({ ok: true, entry_id: open.id, lunch_in: now });
+}
+
 async function workerClockOut(req, env) {
   const sess = await requireWorkerSession(req, env);
   if (!sess) return err(401, 'Session expired');
@@ -457,6 +569,9 @@ async function workerClockOut(req, env) {
 
   const open = await pickWorkerActive(env, sess.worker_id);
   if (!open) return err(409, 'Not clocked in');
+
+  // If worker went ON_LUNCH but never tapped Back From Lunch, they probably forgot.
+  // We do NOT auto-set lunch_in here — let them fix it on the review screen.
 
   const now = Date.now();
   await env.HADFIELD_DB.prepare(
@@ -469,7 +584,87 @@ async function workerClockOut(req, env) {
     notes ? String(notes).slice(0, 500) : null,
     open.id,
   ).run();
+  // Note: clock_out does NOT finish the day — worker still has the review screen
+  // and can edit times until they tap Finish Day.
   return json({ ok: true, entry_id: open.id, clock_out: now });
+}
+
+// Worker self-edit of today's 4 times. Only allowed on the worker's own
+// unfinished row. Worker can adjust clock_in, lunch_out, lunch_in, clock_out
+// (all optional in the patch, but at least one must be present). Validates
+// ordering and forbids setting a time in the future.
+async function workerEditToday(req, env) {
+  const sess = await requireWorkerSession(req, env);
+  if (!sess) return err(401, 'Session expired');
+  const body = await req.json().catch(() => ({}));
+
+  const unfinished = await pickWorkerUnfinished(env, sess.worker_id);
+  if (!unfinished) return err(404, 'No day to edit — you have not clocked in yet');
+
+  const patch = {};
+  for (const k of ['clock_in', 'lunch_out', 'lunch_in', 'clock_out']) {
+    if (body[k] === null) patch[k] = null;          // explicit clear (e.g. remove lunch)
+    else if (body[k] !== undefined) {
+      const n = Number(body[k]);
+      if (!Number.isFinite(n) || n <= 0) return err(400, `${k} must be a unix ms number or null`);
+      patch[k] = n;
+    }
+  }
+  if (Object.keys(patch).length === 0) return err(400, 'No fields to update');
+
+  // Merge with existing row, then validate ordering.
+  const merged = { ...unfinished, ...patch };
+  const soon = Date.now() + 5 * 60 * 1000;  // allow 5 min of clock drift
+  for (const k of ['clock_in', 'lunch_out', 'lunch_in', 'clock_out']) {
+    if (merged[k] != null && merged[k] > soon) return err(400, `${k} cannot be in the future`);
+  }
+  if (!merged.clock_in) return err(400, 'clock_in is required');
+  if (merged.lunch_out && merged.lunch_out < merged.clock_in) return err(400, 'Lunch out must be after clock in');
+  if (merged.lunch_in && merged.lunch_out && merged.lunch_in < merged.lunch_out) return err(400, 'Lunch in must be after lunch out');
+  if (merged.lunch_in && !merged.lunch_out) return err(400, 'Cannot set lunch in without lunch out');
+  if (merged.clock_out && merged.clock_out < merged.clock_in) return err(400, 'Clock out must be after clock in');
+  if (merged.clock_out && merged.lunch_in && merged.clock_out < merged.lunch_in) return err(400, 'Clock out must be after lunch in');
+  if (merged.clock_out && merged.lunch_out && !merged.lunch_in) return err(400, 'Finish lunch before clocking out (or clear the lunch out)');
+
+  const sets = [];
+  const vals = [];
+  for (const [k, v] of Object.entries(patch)) { sets.push(`${k} = ?`); vals.push(v); }
+  sets.push('edited_by_worker = 1');
+  vals.push(unfinished.id);
+
+  await env.HADFIELD_DB.prepare(
+    `UPDATE time_entries SET ${sets.join(', ')} WHERE id = ?`
+  ).bind(...vals).run();
+
+  // Audit: log worker edits too (admin_email column reused with "worker:<name>" prefix
+  // so the existing audit viewer surfaces them). Keeps the payroll-dispute trail complete.
+  await env.HADFIELD_DB.prepare(
+    'INSERT INTO entry_audit (entry_id, admin_email, action, before_json, after_json, changed_at) VALUES (?, ?, ?, ?, ?, ?)'
+  ).bind(
+    unfinished.id,
+    `worker:${sess.worker_name || sess.worker_id}`,
+    'edited',
+    JSON.stringify(unfinished),
+    JSON.stringify({ ...unfinished, ...patch }),
+    Date.now(),
+  ).run();
+
+  return json({ ok: true, entry_id: unfinished.id });
+}
+
+async function workerFinishDay(req, env) {
+  const sess = await requireWorkerSession(req, env);
+  if (!sess) return err(401, 'Session expired');
+
+  const unfinished = await pickWorkerUnfinished(env, sess.worker_id);
+  if (!unfinished) return err(404, 'No day to finish');
+  if (!unfinished.clock_out) return err(409, 'Clock out before finishing the day');
+
+  const now = Date.now();
+  await env.HADFIELD_DB.prepare(
+    'UPDATE time_entries SET worker_finished_day = ? WHERE id = ?'
+  ).bind(now, unfinished.id).run();
+  return json({ ok: true, entry_id: unfinished.id, finished_at: now });
 }
 
 // --- Admin routes ------------------------------------------------------------
@@ -726,20 +921,26 @@ async function adminEntries(req, env, method) {
   }
 
   if (method === 'POST') {
-    // Admin adds a missing punch
+    // Admin adds a missing punch / reconstructs a full day including lunch.
     const body = await req.json().catch(() => ({}));
-    const { worker_id, jobsite_id, task_id, clock_in, clock_out, notes } = body;
+    const { worker_id, jobsite_id, task_id,
+            clock_in, lunch_out, lunch_in, clock_out,
+            notes } = body;
     if (!worker_id || !clock_in) return err(400, 'worker_id and clock_in required');
     const now = Date.now();
     const res = await env.HADFIELD_DB.prepare(
       `INSERT INTO time_entries
-         (worker_id, jobsite_id, task_id, clock_in, clock_out, notes, edited_by_admin, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, 1, ?)`
+         (worker_id, jobsite_id, task_id,
+          clock_in, lunch_out, lunch_in, clock_out,
+          notes, edited_by_admin, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`
     ).bind(
       Number(worker_id),
       jobsite_id ? Number(jobsite_id) : null,
       task_id ? Number(task_id) : null,
       Number(clock_in),
+      lunch_out ? Number(lunch_out) : null,
+      lunch_in  ? Number(lunch_in)  : null,
       clock_out ? Number(clock_out) : null,
       notes || null,
       now,
@@ -763,7 +964,11 @@ async function adminEntryOne(req, env, id, method) {
   if (method === 'PATCH') {
     const body = await req.json().catch(() => ({}));
     const sets = [], vals = [];
-    for (const k of ['worker_id', 'jobsite_id', 'task_id', 'clock_in', 'clock_out', 'notes']) {
+    // Admin can edit any of the 4 punch times, the notes, or any foreign key.
+    // worker_finished_day is editable too so admin can re-open a locked day for the worker.
+    for (const k of ['worker_id', 'jobsite_id', 'task_id',
+                     'clock_in', 'lunch_out', 'lunch_in', 'clock_out',
+                     'worker_finished_day', 'notes']) {
       if (body[k] !== undefined) {
         sets.push(`${k} = ?`);
         vals.push(body[k] === null || body[k] === '' ? null : (k === 'notes' ? String(body[k]) : Number(body[k])));
@@ -837,10 +1042,14 @@ async function adminExportCsv(req, env) {
 
   const rows = [[
     'employee_name', 'qb_employee_id', 'date', 'jobsite', 'service_item',
-    'clock_in_iso', 'clock_out_iso', 'hours', 'notes',
+    'clock_in_iso', 'lunch_out_iso', 'lunch_in_iso', 'clock_out_iso',
+    'gross_hours', 'lunch_hours', 'net_hours', 'notes',
   ]];
   for (const r of results) {
-    const hours = ((r.clock_out - r.clock_in) / 3600000).toFixed(2);
+    const grossMs = r.clock_out - r.clock_in;
+    const lunchMs = (r.lunch_out && r.lunch_in && r.lunch_in > r.lunch_out)
+      ? (r.lunch_in - r.lunch_out) : 0;
+    const netMs   = Math.max(0, grossMs - lunchMs);
     rows.push([
       r.worker_name,
       r.qb_employee_id || '',
@@ -848,8 +1057,12 @@ async function adminExportCsv(req, env) {
       r.jobsite_name || '',
       r.qb_service_item || r.task_name || '',
       new Date(r.clock_in).toISOString(),
+      r.lunch_out ? new Date(r.lunch_out).toISOString() : '',
+      r.lunch_in  ? new Date(r.lunch_in).toISOString()  : '',
       r.clock_out ? new Date(r.clock_out).toISOString() : '',
-      hours,
+      (grossMs / 3600000).toFixed(2),
+      (lunchMs / 3600000).toFixed(2),
+      (netMs   / 3600000).toFixed(2),
       r.notes || '',
     ]);
   }
@@ -1109,7 +1322,12 @@ export default {
       if (p === '/api/worker/context'    && m === 'GET')  return workerContext(req, env);
       if (p === '/api/worker/status'     && m === 'GET')  return workerStatus(req, env);
       if (p === '/api/worker/clock-in'   && m === 'POST') return workerClockIn(req, env);
+      if (p === '/api/worker/lunch-out'  && m === 'POST') return workerLunchOut(req, env);
+      if (p === '/api/worker/lunch-in'   && m === 'POST') return workerLunchIn(req, env);
       if (p === '/api/worker/clock-out'  && m === 'POST') return workerClockOut(req, env);
+      if (p === '/api/worker/today'         && m === 'GET')   return workerToday(req, env);
+      if (p === '/api/worker/today/times'   && m === 'PATCH') return workerEditToday(req, env);
+      if (p === '/api/worker/today/finish'  && m === 'POST')  return workerFinishDay(req, env);
 
       // Admin routes
       if (p === '/api/admin/whoami'      && m === 'GET')  return adminWhoami(req, env);
