@@ -367,6 +367,9 @@ function fillActivePanel(s) {
   $('#subId').textContent     = s.subscription_id || '—';
   $('#updatedAt').textContent = fmtWhen(s.updated_at);
 
+  // Always show Update card when the active panel renders. (After a successful
+  // update-card flow we hide it during the inline stage; this puts it back.)
+  $('#updateCardBtn').classList.remove('hide');
   // If cancel-at-period-end is already set, hide the Cancel button
   $('#cancelBtn').classList.toggle('hide', !!s.cancel_at_period_end);
 }
