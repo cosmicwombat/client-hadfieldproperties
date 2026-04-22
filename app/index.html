@@ -17,7 +17,9 @@
     --accent:      #f97316;
     --accent-dark: #ea580c;
     --success:     #22c55e;
+    --warning:     #eab308;
     --danger:      #ef4444;
+    --info:        #3b82f6;
     --radius:      14px;
     --sans:        -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   }
@@ -120,18 +122,23 @@
   .status-card .label { color: var(--muted); font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; }
   .status-card .value { font-size: 20px; font-weight: 600; margin-top: 6px; }
   .status-card.clocked-in { border-color: var(--success); }
+  .status-card.on-lunch   { border-color: var(--warning); }
+  .status-card.after-lunch{ border-color: var(--success); }
+  .status-card.reviewing  { border-color: var(--info); }
   .status-card .dot {
     display: inline-block; width: 10px; height: 10px; border-radius: 50%;
     background: var(--success); margin-right: 8px; vertical-align: middle;
     animation: pulse 2s infinite;
   }
+  .status-card.on-lunch .dot { background: var(--warning); }
   @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
 
   label.field { display: block; font-size: 13px; color: var(--muted); margin: 14px 0 6px; }
-  select, textarea, input[type="text"] {
+  select, textarea, input[type="text"], input[type="time"] {
     width: 100%; padding: 14px 14px; border-radius: var(--radius);
     background: var(--surface); color: var(--text);
     border: 1px solid var(--border); font-size: 16px; font-family: inherit;
+    color-scheme: dark;
   }
   textarea { resize: vertical; min-height: 60px; }
 
@@ -140,11 +147,24 @@
     font-size: 19px; font-weight: 700; border: 0; cursor: pointer;
     margin-top: 18px; min-height: 64px;
     transition: transform 80ms ease, filter 80ms ease;
+    color: #fff;
   }
   button.big:active { transform: scale(0.99); }
-  button.big.clock-in  { background: var(--success); color: #07140b; }
-  button.big.clock-out { background: var(--danger); color: #fff; }
-  button.big:disabled  { opacity: 0.55; cursor: not-allowed; }
+  button.big.clock-in   { background: var(--success); color: #07140b; }
+  button.big.lunch-out  { background: var(--warning); color: #1f1400; }
+  button.big.lunch-in   { background: var(--success); color: #07140b; }
+  button.big.clock-out  { background: var(--danger);  color: #fff; }
+  button.big.finish     { background: var(--info);    color: #fff; }
+  button.big:disabled   { opacity: 0.55; cursor: not-allowed; }
+
+  button.secondary {
+    width: 100%; padding: 14px; border-radius: var(--radius);
+    font-size: 15px; font-weight: 600; cursor: pointer;
+    background: transparent; color: var(--muted);
+    border: 1px solid var(--border); margin-top: 10px;
+  }
+  button.secondary:active { background: var(--surface); }
+  button.secondary.danger { color: var(--danger); border-color: var(--danger); }
 
   button.ghost {
     background: transparent; color: var(--muted); border: 0;
@@ -153,13 +173,79 @@
   }
   button.ghost:hover { color: var(--text); }
 
+  /* Review screen */
+  .review-list {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); overflow: hidden;
+    margin: 8px 0 16px;
+  }
+  .review-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px; border-bottom: 1px solid var(--border);
+    cursor: pointer; min-height: 64px;
+    transition: background 80ms ease;
+  }
+  .review-row:last-child { border-bottom: 0; }
+  .review-row:active { background: var(--surface2); }
+  .review-row.unset { color: var(--muted); }
+  .review-row .review-label {
+    font-size: 13px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.06em;
+  }
+  .review-row .review-value {
+    font-size: 22px; font-weight: 600; margin-top: 4px;
+    font-variant-numeric: tabular-nums;
+  }
+  .review-row.unset .review-value { font-size: 15px; font-weight: 400; font-style: italic; }
+  .review-row .review-edit { color: var(--accent); font-size: 14px; font-weight: 500; }
+  .review-totals {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 16px;
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 12px;
+  }
+  .review-totals .total-label { color: var(--muted); font-size: 14px; }
+  .review-totals .total-value {
+    font-size: 28px; font-weight: 700; color: var(--accent);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Edit modal */
+  .modal-scrim {
+    position: fixed; inset: 0; background: rgba(0, 0, 0, 0.7);
+    display: none; align-items: flex-end; justify-content: center;
+    z-index: 200;
+  }
+  .modal-scrim.show { display: flex; }
+  .modal {
+    background: var(--surface); border-top: 1px solid var(--border);
+    border-radius: 20px 20px 0 0;
+    padding: 24px 20px calc(24px + env(safe-area-inset-bottom));
+    width: 100%; max-width: 480px;
+    animation: slideUp 220ms ease;
+  }
+  @keyframes slideUp { from { transform: translateY(40px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+  .modal h3 { margin: 0 0 6px; font-size: 18px; }
+  .modal p.hint { margin: 0 0 16px; color: var(--muted); font-size: 14px; }
+  .modal .modal-actions {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 18px;
+  }
+  .modal button {
+    padding: 14px; border-radius: var(--radius); font-size: 16px; font-weight: 600;
+    border: 1px solid var(--border); background: var(--surface2); color: var(--text);
+    cursor: pointer;
+  }
+  .modal button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .modal button.danger  { background: transparent; border-color: var(--danger); color: var(--danger); }
+  .modal .modal-clear-row { margin-top: 10px; }
+
   .toast {
     position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
     background: var(--surface); border: 1px solid var(--border);
     color: var(--text); padding: 14px 18px; border-radius: var(--radius);
     font-size: 14px; box-shadow: 0 8px 20px rgba(0, 0, 0, 0.5);
     opacity: 0; pointer-events: none; transition: opacity 180ms ease, transform 180ms ease;
-    z-index: 100; max-width: 90%;
+    z-index: 300; max-width: 90%;
   }
   .toast.show { opacity: 1; transform: translateX(-50%) translateY(-4px); }
   .toast.success { border-color: var(--success); }
@@ -177,6 +263,19 @@
     font-size: 13px; margin-bottom: 12px; display: none;
   }
   .queued-banner.show { display: block; }
+
+  .review-intro {
+    color: var(--muted); font-size: 14px; margin: -4px 0 12px;
+  }
+
+  .context-chips {
+    display: flex; flex-wrap: wrap; gap: 8px; margin: -4px 0 14px;
+  }
+  .chip {
+    font-size: 13px; padding: 6px 12px; border-radius: 999px;
+    background: var(--surface2); color: var(--muted);
+    border: 1px solid var(--border);
+  }
 </style>
 </head>
 <body>
@@ -193,7 +292,7 @@
   </header>
 
   <div id="queuedBanner" class="queued-banner">
-    <span id="queuedCount">0</span> punch(es) queued — will sync when online
+    <span id="queuedCount">0</span> action(s) queued — will sync when online
   </div>
 
   <main>
@@ -215,36 +314,31 @@
       <button class="ghost" id="backFromPin">← Pick a different name</button>
     </section>
 
-    <!-- Screen 3: Clock in/out -->
+    <!-- Screen 3: Clock (state-driven: IDLE / WORKING_PRE_LUNCH / ON_LUNCH / AFTER_LUNCH / REVIEWING / FINISHED) -->
     <section id="screen-clock" class="screen">
       <h2 class="title" id="hello">Welcome</h2>
-      <div id="statusCard" class="status-card">
-        <div class="label">Status</div>
-        <div class="value" id="statusValue">Not clocked in</div>
-      </div>
-
-      <div id="clockInForm">
-        <label class="field" for="jobsite">Jobsite</label>
-        <select id="jobsite"></select>
-
-        <label class="field" for="task">Task / cost code</label>
-        <select id="task"></select>
-
-        <label class="field" for="notes">Note (optional)</label>
-        <textarea id="notes" placeholder="Short note…" maxlength="500"></textarea>
-
-        <button class="big clock-in" id="clockInBtn">CLOCK IN</button>
-      </div>
-
-      <div id="clockOutForm" style="display:none;">
-        <button class="big clock-out" id="clockOutBtn">CLOCK OUT</button>
-      </div>
-
+      <div id="clockBody"><!-- rendered by renderClockScreen() --></div>
       <button class="ghost" id="logoutBtn">← Finish (next person)</button>
     </section>
   </main>
 
   <a class="admin-link" href="/admin/">Admin →</a>
+</div>
+
+<!-- Edit-time modal -->
+<div class="modal-scrim" id="editModal">
+  <div class="modal">
+    <h3 id="editModalTitle">Edit time</h3>
+    <p class="hint" id="editModalHint">Tap the time to pick a new value.</p>
+    <input type="time" id="editTimeInput" step="60" />
+    <div class="modal-clear-row" id="editClearRow" style="display:none;">
+      <button class="danger" id="editClearBtn">Clear this punch</button>
+    </div>
+    <div class="modal-actions">
+      <button id="editCancelBtn">Cancel</button>
+      <button class="primary" id="editSaveBtn">Save</button>
+    </div>
+  </div>
 </div>
 
 <div id="toast" class="toast"></div>
@@ -253,9 +347,19 @@
 /* =============================================================================
  * Hadfield Properties Time Clock — worker PWA
  *
- * Three screens: pick name → enter PIN → clock in/out. Offline-capable; a
- * punch made while offline is queued in IndexedDB and replayed when online.
- * All API calls go to /api/* (same-origin, served by hadfield-worker).
+ * Screens: pick name → enter PIN → clock screen (state-driven).
+ *
+ * Clock screen states (driven by backend /api/worker/status):
+ *   IDLE              → show clock-in form (jobsite / task / notes → CLOCK IN)
+ *   WORKING_PRE_LUNCH → "Clocked in since…"  [OUT FOR LUNCH] / [CLOCK OUT]
+ *   ON_LUNCH          → "On lunch since…"    [BACK FROM LUNCH]
+ *   AFTER_LUNCH       → "Back at work…"      [CLOCK OUT]
+ *   REVIEWING         → review + edit 4 times + [FINISH DAY]
+ *   FINISHED          → "Day complete"       [NEXT PERSON]
+ *
+ * Offline: every write (punch / edit / finish) is queued in IndexedDB if the
+ * fetch fails or we're navigator.onLine === false. Queue is replayed on
+ * reconnect. Each replay is keyed by its intended API endpoint.
  * ============================================================================= */
 
 const API = '/api';
@@ -264,8 +368,9 @@ const state = {
   context: { jobsites: [], tasks: [] },
   selected: null,
   pin: '',
-  session: null,   // { worker_id, full_name }
-  activeEntry: null,
+  session: null,      // { worker_id, full_name }
+  day: null,          // { state, entry, net_worked_ms }
+  editField: null,    // one of 'clock_in','lunch_out','lunch_in','clock_out' while modal open
 };
 
 // ---- tiny helpers ----
@@ -281,7 +386,29 @@ function initials(name) {
     .map(s => s[0].toUpperCase()).join('');
 }
 function fmtTime(ts) {
+  if (!ts) return '';
   return new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+function fmtHm(ms) {
+  if (!ms || ms < 0) ms = 0;
+  const totalMin = Math.round(ms / 60000);
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return `${h}h ${m.toString().padStart(2, '0')}m`;
+}
+// Convert a "HH:MM" string (today's local date) + a reference day (from ts) → unix ms.
+// Keeps the same calendar date as ref_ts, swaps the hour+minute.
+function hmToMs(hhmm, refMs) {
+  if (!hhmm || !/^\d{2}:\d{2}$/.test(hhmm)) return null;
+  const [hh, mm] = hhmm.split(':').map(Number);
+  const ref = new Date(refMs || Date.now());
+  ref.setHours(hh, mm, 0, 0);
+  return ref.getTime();
+}
+function msToHm(ms) {
+  if (!ms) return '';
+  const d = new Date(ms);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 let toastTimer;
 function toast(msg, kind = '') {
@@ -290,6 +417,9 @@ function toast(msg, kind = '') {
   t.className = 'toast show ' + kind;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => t.classList.remove('show'), 2600);
+}
+function escapeHtml(s) {
+  return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 async function api(path, opts = {}) {
   const r = await fetch(API + path, {
@@ -300,14 +430,18 @@ async function api(path, opts = {}) {
   if (!r.ok) {
     let body = {};
     try { body = await r.json(); } catch {}
-    throw new Error(body.error || ('HTTP ' + r.status));
+    const e = new Error(body.error || ('HTTP ' + r.status));
+    e.status = r.status;
+    throw e;
   }
   return r.json();
 }
 
 // ---- IndexedDB offline queue ----
+// Queue record shape: { id (auto), op, payload, ts }
+//   op ∈ 'clock-in' | 'lunch-out' | 'lunch-in' | 'clock-out' | 'edit-today' | 'finish-day'
 const DB_NAME = 'hadfield-queue';
-const STORE   = 'punches';
+const STORE   = 'punches';   // legacy name — holds all kinds of queued actions
 function openDb() {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, 1);
@@ -321,12 +455,11 @@ function openDb() {
     req.onerror = () => reject(req.error);
   });
 }
-async function queuePunch(kind, payload) {
+async function queueAction(op, payload) {
   const db = await openDb();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, 'readwrite');
-    const rec = { kind, payload, ts: Date.now() };
-    tx.objectStore(STORE).add(rec);
+    tx.objectStore(STORE).add({ op, payload, ts: Date.now() });
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });
@@ -362,18 +495,34 @@ async function refreshQueueBadge() {
     updateNetBadge();
   }
 }
+// Map an op name → (method, path) for replay.
+const OP_TO_ROUTE = {
+  'clock-in':    { method: 'POST',  path: '/worker/clock-in' },
+  'lunch-out':   { method: 'POST',  path: '/worker/lunch-out' },
+  'lunch-in':    { method: 'POST',  path: '/worker/lunch-in' },
+  'clock-out':   { method: 'POST',  path: '/worker/clock-out' },
+  'edit-today':  { method: 'PATCH', path: '/worker/today/times' },
+  'finish-day':  { method: 'POST',  path: '/worker/today/finish' },
+};
 async function flushQueue() {
   if (!navigator.onLine) return;
   const q = await readQueue();
   for (const rec of q) {
+    const route = OP_TO_ROUTE[rec.op];
+    if (!route) { await deleteFromQueue(rec.id); continue; }
     try {
-      await api('/worker/' + rec.kind, { method: 'POST', body: JSON.stringify(rec.payload) });
+      await api(route.path, { method: route.method, body: JSON.stringify(rec.payload || {}) });
       await deleteFromQueue(rec.id);
     } catch (e) {
-      // 401 on server side means the original session expired — drop the record so we don't
-      // replay forever. A real session conflict (409 already clocked in) also drops.
-      if (/401|403|404|409/.test(e.message)) await deleteFromQueue(rec.id);
-      break; // stop on any error so we retry later rather than thrashing
+      // 401/403 = session expired (silent drop — worker will re-auth next time)
+      // 404     = entry gone (admin deleted) — drop
+      // 409     = state conflict (e.g. already clocked in) — drop (punch is moot)
+      // 400     = validation error — drop (won't succeed on replay)
+      if (/^(400|401|403|404|409)$/.test(String(e.status))) {
+        await deleteFromQueue(rec.id);
+        continue;
+      }
+      break; // 5xx / network: stop, try again later
     }
   }
   await refreshQueueBadge();
@@ -416,8 +565,8 @@ function renderWorkers(filter = '') {
   }
   host.innerHTML = rows.map(w => `
     <div class="worker-row" data-id="${w.id}">
-      <div class="avatar">${initials(w.full_name)}</div>
-      <div class="name">${w.full_name}</div>
+      <div class="avatar">${escapeHtml(initials(w.full_name))}</div>
+      <div class="name">${escapeHtml(w.full_name)}</div>
     </div>
   `).join('');
   host.querySelectorAll('.worker-row').forEach(r => {
@@ -465,10 +614,10 @@ async function submitPin() {
     state.session = out;
     $('#hello').textContent = `Hi, ${out.full_name}`;
     state.pin = '';
-    await loadClockScreen();
+    await loadContext();
+    await loadDay();
     show('screen-clock');
   } catch (e) {
-    // shake and clear
     const d = $('#pinDisplay');
     d.classList.remove('shake'); void d.offsetWidth; d.classList.add('shake');
     state.pin = '';
@@ -477,43 +626,263 @@ async function submitPin() {
   }
 }
 
-// ---- Screen 3: clock in/out ----
-async function loadClockScreen() {
+// ---- Screen 3: clock screen (state-driven) ----
+async function loadContext() {
   try {
     const ctx = await api('/worker/context');
     state.context = { jobsites: ctx.jobsites, tasks: ctx.tasks };
-    $('#jobsite').innerHTML = ctx.jobsites.map(j => `<option value="${j.id}">${j.name}</option>`).join('') || '<option value="">(none — admin must add)</option>';
-    $('#task').innerHTML    = ctx.tasks.map(t   => `<option value="${t.id}">${t.name}</option>`).join('')   || '<option value="">(none — admin must add)</option>';
   } catch (e) {
-    toast('Could not load jobsites: ' + e.message, 'error');
+    // Context is needed for clock-in form only — offline use will fall back to
+    // whatever was in state previously (empty on first load).
   }
+}
+async function loadDay() {
   try {
     const s = await api('/worker/status');
-    state.activeEntry = s.active_entry;
+    state.day = { state: s.state, entry: s.entry, net_worked_ms: s.net_worked_ms };
   } catch {
-    state.activeEntry = null;
+    state.day = { state: 'IDLE', entry: null, net_worked_ms: 0 };
   }
-  renderClockState();
+  renderClockScreen();
 }
 
-function renderClockState() {
-  const card = $('#statusCard');
-  const val = $('#statusValue');
-  if (state.activeEntry) {
-    card.classList.add('clocked-in');
-    const since = fmtTime(state.activeEntry.clock_in);
-    const at = state.activeEntry.jobsite_name ? ' at ' + state.activeEntry.jobsite_name : '';
-    val.innerHTML = `<span class="dot"></span>Clocked in since ${since}${at}`;
-    $('#clockInForm').style.display = 'none';
-    $('#clockOutForm').style.display = 'block';
-  } else {
-    card.classList.remove('clocked-in');
-    val.textContent = 'Not clocked in';
-    $('#clockInForm').style.display = 'block';
-    $('#clockOutForm').style.display = 'none';
+function renderClockScreen() {
+  const body = $('#clockBody');
+  const st = state.day?.state || 'IDLE';
+  const entry = state.day?.entry;
+
+  if (st === 'IDLE') {
+    body.innerHTML = renderClockInForm();
+    wireClockInForm();
+    return;
+  }
+
+  if (st === 'FINISHED') {
+    body.innerHTML = `
+      <div class="status-card">
+        <div class="label">Day complete</div>
+        <div class="value">✅ You're all set</div>
+      </div>
+      <div class="review-totals">
+        <span class="total-label">Total worked</span>
+        <span class="total-value">${fmtHm(state.day.net_worked_ms)}</span>
+      </div>
+      <button class="big finish" id="nextBtn">NEXT PERSON</button>
+    `;
+    $('#nextBtn').addEventListener('click', () => logout());
+    return;
+  }
+
+  // In-progress states share a status card + state-specific primary action buttons.
+  const cardHtml = renderStatusCard(st, entry);
+  const actionHtml = renderStateActions(st);
+  const contextChips = entry ? `
+    <div class="context-chips">
+      ${entry.jobsite_name ? `<span class="chip">📍 ${escapeHtml(entry.jobsite_name)}</span>` : ''}
+      ${entry.task_name ? `<span class="chip">🔧 ${escapeHtml(entry.task_name)}</span>` : ''}
+    </div>` : '';
+
+  if (st === 'REVIEWING') {
+    body.innerHTML = cardHtml + contextChips + renderReview(entry) + actionHtml;
+    wireReview();
+    wireStateActions(st);
+    return;
+  }
+
+  body.innerHTML = cardHtml + contextChips + actionHtml;
+  wireStateActions(st);
+}
+
+function renderClockInForm() {
+  const jOpts = state.context.jobsites.map(j => `<option value="${j.id}">${escapeHtml(j.name)}</option>`).join('') || '<option value="">(none — admin must add)</option>';
+  const tOpts = state.context.tasks.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('') || '<option value="">(none — admin must add)</option>';
+  return `
+    <div class="status-card">
+      <div class="label">Status</div>
+      <div class="value">Not clocked in</div>
+    </div>
+    <label class="field" for="jobsite">Jobsite</label>
+    <select id="jobsite">${jOpts}</select>
+    <label class="field" for="task">Task / cost code</label>
+    <select id="task">${tOpts}</select>
+    <label class="field" for="notes">Note (optional)</label>
+    <textarea id="notes" placeholder="Short note…" maxlength="500"></textarea>
+    <button class="big clock-in" id="clockInBtn">CLOCK IN</button>
+  `;
+}
+function wireClockInForm() {
+  $('#clockInBtn').addEventListener('click', doClockIn);
+}
+
+function renderStatusCard(st, entry) {
+  const cls = {
+    WORKING_PRE_LUNCH: 'clocked-in',
+    ON_LUNCH:          'on-lunch',
+    AFTER_LUNCH:       'after-lunch',
+    REVIEWING:         'reviewing',
+  }[st] || '';
+  const label = {
+    WORKING_PRE_LUNCH: 'Status',
+    ON_LUNCH:          'Status',
+    AFTER_LUNCH:       'Status',
+    REVIEWING:         'Review your day',
+  }[st] || 'Status';
+  let value = '';
+  if (st === 'WORKING_PRE_LUNCH') value = `<span class="dot"></span>Clocked in since ${fmtTime(entry.clock_in)}`;
+  else if (st === 'ON_LUNCH')     value = `<span class="dot"></span>On lunch since ${fmtTime(entry.lunch_out)}`;
+  else if (st === 'AFTER_LUNCH')  value = `<span class="dot"></span>Back since ${fmtTime(entry.lunch_in)} · ${fmtHm(state.day.net_worked_ms)} worked`;
+  else if (st === 'REVIEWING')    value = `Check your times, then tap Finish Day`;
+  return `
+    <div class="status-card ${cls}">
+      <div class="label">${label}</div>
+      <div class="value">${value}</div>
+    </div>
+  `;
+}
+
+function renderStateActions(st) {
+  if (st === 'WORKING_PRE_LUNCH') {
+    return `
+      <button class="big lunch-out" id="btnLunchOut">OUT FOR LUNCH</button>
+      <button class="secondary danger" id="btnSkipLunchOut">Skip lunch · clock out</button>
+    `;
+  }
+  if (st === 'ON_LUNCH') {
+    return `<button class="big lunch-in" id="btnLunchIn">BACK FROM LUNCH</button>`;
+  }
+  if (st === 'AFTER_LUNCH') {
+    return `<button class="big clock-out" id="btnClockOut">CLOCK OUT</button>`;
+  }
+  if (st === 'REVIEWING') {
+    return `<button class="big finish" id="btnFinish">FINISH DAY</button>`;
+  }
+  return '';
+}
+function wireStateActions(st) {
+  if (st === 'WORKING_PRE_LUNCH') {
+    $('#btnLunchOut').addEventListener('click', () => doPunch('lunch-out'));
+    $('#btnSkipLunchOut').addEventListener('click', () => doPunch('clock-out'));
+  } else if (st === 'ON_LUNCH') {
+    $('#btnLunchIn').addEventListener('click', () => doPunch('lunch-in'));
+  } else if (st === 'AFTER_LUNCH') {
+    $('#btnClockOut').addEventListener('click', () => doPunch('clock-out'));
+  } else if (st === 'REVIEWING') {
+    $('#btnFinish').addEventListener('click', doFinishDay);
   }
 }
 
+function renderReview(entry) {
+  const rows = [
+    { k: 'clock_in',  label: 'Start of day',    required: true  },
+    { k: 'lunch_out', label: 'Out for lunch',   required: false },
+    { k: 'lunch_in',  label: 'Back from lunch', required: false },
+    { k: 'clock_out', label: 'End of day',      required: true  },
+  ];
+  const html = rows.map(r => {
+    const v = entry[r.k];
+    const value = v ? fmtTime(v) : (r.required ? '(missing)' : 'skipped');
+    return `
+      <div class="review-row ${v ? '' : 'unset'}" data-field="${r.k}">
+        <div>
+          <div class="review-label">${r.label}</div>
+          <div class="review-value">${escapeHtml(value)}</div>
+        </div>
+        <div class="review-edit">Edit</div>
+      </div>
+    `;
+  }).join('');
+  return `
+    <p class="review-intro">Tap any time to adjust before finishing.</p>
+    <div class="review-list">${html}</div>
+    <div class="review-totals">
+      <span class="total-label">Total worked</span>
+      <span class="total-value">${fmtHm(state.day.net_worked_ms)}</span>
+    </div>
+  `;
+}
+function wireReview() {
+  $$('.review-row').forEach(row => {
+    row.addEventListener('click', () => openEditModal(row.dataset.field));
+  });
+}
+
+// ---- edit modal ----
+function openEditModal(field) {
+  state.editField = field;
+  const entry = state.day.entry;
+  const labels = {
+    clock_in:  { title: 'Edit start of day',    hint: 'When did you actually start?' },
+    lunch_out: { title: 'Edit out-for-lunch',   hint: 'When did you leave for lunch?' },
+    lunch_in:  { title: 'Edit back-from-lunch', hint: 'When did you come back from lunch?' },
+    clock_out: { title: 'Edit end of day',      hint: 'When did you finish?' },
+  };
+  $('#editModalTitle').textContent = labels[field].title;
+  $('#editModalHint').textContent  = labels[field].hint;
+  const existing = entry[field];
+  $('#editTimeInput').value = existing ? msToHm(existing) : msToHm(Date.now());
+  // Only lunch is clearable (the "I skipped lunch" case); clock_in / clock_out are required.
+  const canClear = (field === 'lunch_out' || field === 'lunch_in' || field === 'clock_out');
+  $('#editClearRow').style.display = (canClear && existing) ? 'block' : 'none';
+  $('#editModal').classList.add('show');
+  setTimeout(() => $('#editTimeInput').focus(), 100);
+}
+function closeEditModal() {
+  $('#editModal').classList.remove('show');
+  state.editField = null;
+}
+async function saveEditFromModal() {
+  const field = state.editField;
+  if (!field) return;
+  const hm = $('#editTimeInput').value;
+  if (!hm) { toast('Pick a time', 'error'); return; }
+  const refMs = state.day.entry.clock_in || Date.now();
+  const newMs = hmToMs(hm, refMs);
+  if (!newMs) { toast('Invalid time', 'error'); return; }
+  await submitEdit({ [field]: newMs });
+}
+async function clearPunchFromModal() {
+  const field = state.editField;
+  if (!field) return;
+  await submitEdit({ [field]: null });
+}
+async function submitEdit(patch) {
+  const before = { ...state.day.entry };
+  // Optimistic local update so the review screen feels instant.
+  state.day.entry = { ...state.day.entry, ...patch };
+  closeEditModal();
+  renderClockScreen();
+  try {
+    if (!navigator.onLine) throw Object.assign(new Error('offline'), { offline: true });
+    const r = await fetch(API + '/worker/today/times', {
+      method: 'PATCH',
+      credentials: 'include',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(patch),
+    });
+    if (!r.ok) {
+      let body = {};
+      try { body = await r.json(); } catch {}
+      throw Object.assign(new Error(body.error || 'HTTP ' + r.status), { status: r.status });
+    }
+    // Refresh from server so we also get the state transitions (e.g. clearing
+    // clock_out should bump us back to AFTER_LUNCH / WORKING_PRE_LUNCH).
+    await loadDay();
+    toast('Saved', 'success');
+  } catch (e) {
+    if (e.offline || !navigator.onLine) {
+      await queueAction('edit-today', patch);
+      toast('Edit saved offline — will sync', '');
+      await refreshQueueBadge();
+    } else {
+      // Rollback optimistic update on server error.
+      state.day.entry = before;
+      renderClockScreen();
+      toast(e.message || 'Could not save edit', 'error');
+    }
+  }
+}
+
+// ---- punches (clock-in / lunch-out / lunch-in / clock-out) ----
 async function doClockIn() {
   const btn = $('#clockInBtn');
   btn.disabled = true; btn.textContent = 'CLOCKING IN…';
@@ -528,52 +897,66 @@ async function doClockIn() {
     toast('Pick a jobsite and task', 'error');
     return;
   }
-  try {
-    if (!navigator.onLine) throw Object.assign(new Error('offline'), { offline: true });
-    await api('/worker/clock-in', { method: 'POST', body: JSON.stringify(payload) });
-    toast(`Clocked in at ${fmtTime(Date.now())} — have a good day`, 'success');
-  } catch (e) {
-    if (e.offline || !navigator.onLine) {
-      await queuePunch('clock-in', payload);
-      toast('Queued — will sync when online', '');
-      await refreshQueueBadge();
-    } else {
-      toast(e.message || 'Clock-in failed', 'error');
-      btn.disabled = false; btn.textContent = 'CLOCK IN';
-      return;
-    }
-  }
-  setTimeout(() => logout(true), 3000);
+  await attemptPunch('clock-in', payload, 'Clocked in');
 }
 
-async function doClockOut() {
-  const btn = $('#clockOutBtn');
-  btn.disabled = true; btn.textContent = 'CLOCKING OUT…';
-  const payload = { ...(await getGps()) };
+async function doPunch(op) {
+  const payload = await getGps();
+  const label = {
+    'lunch-out': 'Out for lunch',
+    'lunch-in':  'Back from lunch',
+    'clock-out': 'Clocked out',
+  }[op] || op;
+  await attemptPunch(op, payload, label);
+}
+
+async function attemptPunch(op, payload, successMsg) {
+  const route = OP_TO_ROUTE[op];
   try {
     if (!navigator.onLine) throw Object.assign(new Error('offline'), { offline: true });
-    await api('/worker/clock-out', { method: 'POST', body: JSON.stringify(payload) });
-    toast(`Clocked out at ${fmtTime(Date.now())}`, 'success');
+    await api(route.path, { method: route.method, body: JSON.stringify(payload) });
+    toast(`${successMsg} at ${fmtTime(Date.now())}`, 'success');
   } catch (e) {
     if (e.offline || !navigator.onLine) {
-      await queuePunch('clock-out', payload);
-      toast('Queued — will sync when online', '');
+      await queueAction(op, payload);
+      toast(`${successMsg} — queued offline, will sync`, '');
       await refreshQueueBadge();
     } else {
-      toast(e.message || 'Clock-out failed', 'error');
-      btn.disabled = false; btn.textContent = 'CLOCK OUT';
+      toast(e.message || 'Failed', 'error');
       return;
     }
   }
-  setTimeout(() => logout(true), 3000);
+  await loadDay();
+}
+
+async function doFinishDay() {
+  const btn = $('#btnFinish');
+  btn.disabled = true; btn.textContent = 'FINISHING…';
+  try {
+    if (!navigator.onLine) throw Object.assign(new Error('offline'), { offline: true });
+    await api('/worker/today/finish', { method: 'POST', body: '{}' });
+    toast('Day finished — nice work', 'success');
+  } catch (e) {
+    if (e.offline || !navigator.onLine) {
+      await queueAction('finish-day', {});
+      toast('Finish queued — will sync when online', '');
+      await refreshQueueBadge();
+    } else {
+      btn.disabled = false; btn.textContent = 'FINISH DAY';
+      toast(e.message || 'Could not finish day', 'error');
+      return;
+    }
+  }
+  await loadDay();
+  // After finish, auto-return to name screen after a pause.
+  setTimeout(() => logout(true), 2500);
 }
 
 // ---- logout / back to name screen ----
 async function logout(silent = false) {
   try { await api('/worker/logout', { method: 'POST' }); } catch {}
-  state.session = null; state.selected = null; state.activeEntry = null;
+  state.session = null; state.selected = null; state.day = null;
   state.pin = '';
-  $('#notes').value = '';
   $('#search').value = '';
   renderWorkers();
   show('screen-name');
@@ -600,9 +983,15 @@ async function boot() {
 
   $('#search').addEventListener('input', e => renderWorkers(e.target.value));
   $('#backFromPin').addEventListener('click', () => { state.pin = ''; renderPin(); show('screen-name'); });
-  $('#clockInBtn').addEventListener('click', doClockIn);
-  $('#clockOutBtn').addEventListener('click', doClockOut);
   $('#logoutBtn').addEventListener('click', () => logout());
+
+  // Edit modal wiring
+  $('#editCancelBtn').addEventListener('click', closeEditModal);
+  $('#editSaveBtn').addEventListener('click', saveEditFromModal);
+  $('#editClearBtn').addEventListener('click', clearPunchFromModal);
+  $('#editModal').addEventListener('click', e => {
+    if (e.target.id === 'editModal') closeEditModal();  // tap scrim to dismiss
+  });
 
   window.addEventListener('online', () => { updateNetBadge(); flushQueue(); });
   window.addEventListener('offline', updateNetBadge);
