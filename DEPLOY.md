@@ -22,7 +22,7 @@ In the Cloudflare dashboard for the `appsforhire.app` zone, add a CNAME record:
 ### Step 2 — Storage + schema
 
 ```bash
-cd ~/app_for_hire/builds/hadfieldproperties/worker
+cd ~/apps_for_hire/builds/hadfieldproperties/worker
 
 # D1 database — copy the printed database_id into wrangler.toml line 20
 npx wrangler d1 create hadfield-db
@@ -34,8 +34,14 @@ npx wrangler kv namespace create hadfield-kv
 # R2 bucket
 npx wrangler r2 bucket create hadfield-assets
 
-# Apply the schema (seeds jobsites + tasks, leaves workers empty)
+# Apply the initial schema (seeds jobsites + tasks, leaves workers empty)
 npx wrangler d1 execute hadfield-db --remote --file=./migrations/0001_initial.sql
+
+# Apply the lunch / self-edit / finish-day schema additions
+# SAFE to run on a DB that already has data — uses ALTER TABLE ADD COLUMN
+# and only backfills worker_finished_day on rows that are already completed.
+# If this errors with "duplicate column name", the migration is already applied.
+npx wrangler d1 execute hadfield-db --remote --file=./migrations/0002_lunch.sql
 ```
 
 ### Step 3 — Create the Cloudflare Access application
@@ -61,7 +67,7 @@ In the Cloudflare dashboard:
 ### Step 4 — Worker secrets
 
 ```bash
-cd ~/app_for_hire/builds/hadfieldproperties/worker
+cd ~/apps_for_hire/builds/hadfieldproperties/worker
 
 # HMAC key for the worker_session cookie (12h PIN login)
 npx wrangler secret put WORKER_SESSION_SECRET --name hadfield-worker
@@ -101,7 +107,7 @@ Workers don't pick up new secrets until they're redeployed. Any time you run `wr
 ### Step 6 — Deploy the frontend
 
 ```bash
-cd ~/app_for_hire
+cd ~/apps_for_hire
 python3 scripts/deploy_app.py hadfieldproperties
 ```
 
@@ -114,16 +120,49 @@ That pushes `app/`, `admin/`, `index.html`, `manifest.json`, and `sw.js` to the 
 ### Frontend only (edits to `app/`, `admin/`, `index.html`, etc.)
 
 ```bash
-cd ~/app_for_hire
+cd ~/apps_for_hire
 python3 scripts/deploy_app.py hadfieldproperties
 ```
 
 ### Worker only (edits to `worker.js`, `wrangler.toml`, or any secret)
 
 ```bash
-cd ~/app_for_hire/builds/hadfieldproperties/worker
+cd ~/apps_for_hire/builds/hadfieldproperties/worker
 npx wrangler deploy --name hadfield-worker
 ```
+
+---
+
+## Upgrade: end-of-day review + self-edit (migration 0002)
+
+This is the one-shot upgrade for an already-live Hadfield deployment that adds
+the 4-punch day (clock-in / lunch-out / lunch-in / clock-out), worker self-edit,
+and Finish-Day lock. **No existing time entries are lost** — the migration only
+adds new columns and marks already-completed rows as "finished".
+
+Run all three commands, in order, from `~/apps_for_hire`:
+
+```bash
+# 1. Apply the DB migration (adds columns, builds index, backfills flags).
+cd ~/apps_for_hire/builds/hadfieldproperties/worker && \
+  npx wrangler d1 execute hadfield-db --remote --file=./migrations/0002_lunch.sql
+```
+
+```bash
+# 2. Deploy the new Worker code (new /api/worker/lunch-out, lunch-in, today, today/times, today/finish routes).
+cd ~/apps_for_hire/builds/hadfieldproperties/worker && \
+  npx wrangler deploy --name hadfield-worker
+```
+
+```bash
+# 3. Deploy the new worker PWA + admin panel (state-driven review screen, lunch columns).
+cd ~/apps_for_hire && python3 scripts/deploy_app.py hadfieldproperties
+```
+
+If Step 1 errors with `duplicate column name: lunch_out`, the migration is
+already applied — skip Step 1 and continue to Step 2. The migration is
+idempotent for the backfill (`WHERE worker_finished_day IS NULL`), so the
+UPDATE at the bottom is safe to re-run.
 
 ---
 
@@ -151,7 +190,10 @@ npx wrangler deploy --name hadfield-worker
 | `401 No CF Access token` | CF Access isn't in front of `/admin/*` | In the Access app: hostname/path must be exactly `hadfieldproperties.appsforhire.app` + `admin/*` |
 | `403 Not in admin allowlist: <email>` | Email isn't in `ADMIN_EMAILS` secret | Re-run `wrangler secret put ADMIN_EMAILS` with a clean comma-separated list, redeploy |
 | `401 Session expired` on worker PWA | 12h PIN session timed out | Worker picks their name and re-enters their PIN |
-| `500 D1_ERROR` on any API call | Migrations not applied | `npx wrangler d1 execute hadfield-db --remote --file=./migrations/0001_initial.sql` |
+| `500 D1_ERROR` on any API call | Migrations not applied | `npx wrangler d1 execute hadfield-db --remote --file=./migrations/0001_initial.sql` then `./migrations/0002_lunch.sql` |
+| Worker PWA: `no such column: lunch_out` in tail logs | Migration `0002_lunch.sql` not yet applied to remote DB | `npx wrangler d1 execute hadfield-db --remote --file=./migrations/0002_lunch.sql` |
+| Worker PWA shows "You already have an unfinished day" on a brand-new worker | Pre-migration open row is still in the DB for that worker | Admin panel → Time entries → find the open row for that worker → either set Clock-out + Finish-Day via the ✎ edit, or delete it |
+| Admin entries table shows "⚠ lunch" on a row | Only one of `lunch_out` / `lunch_in` is set (worker's phone crashed mid-lunch) | Admin ✎ edit → either fill in the missing punch or clear both lunch fields |
 | Admin panel: `PDFLib is not defined` when generating a PDF | pdf-lib CDN failed to load | Hard-refresh the admin page |
 
 ---
@@ -159,7 +201,7 @@ npx wrangler deploy --name hadfield-worker
 ## Watching logs live
 
 ```bash
-cd ~/app_for_hire/builds/hadfieldproperties/worker
+cd ~/apps_for_hire/builds/hadfieldproperties/worker
 npx wrangler tail --name hadfield-worker
 ```
 
