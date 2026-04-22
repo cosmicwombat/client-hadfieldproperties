@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Hadfield Properties — Billing</title>
+<script src="https://js.stripe.com/v3/"></script>
+<style>
+  :root {
+    --bg:          #0f1115;
+    --surface:     #1a1d24;
+    --surface2:    #242832;
+    --border:      #323744;
+    --text:        #f1f5f9;
+    --muted:       #94a3b8;
+    --accent:      #f97316;
+    --accent-dark: #ea580c;
+    --success:     #22c55e;
+    --danger:      #ef4444;
+    --radius:      12px;
+    --sans:        -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: var(--sans); min-height: 100%; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .app {
+    display: grid;
+    grid-template-columns: 240px 1fr;
+    min-height: 100vh;
+  }
+  @media (max-width: 860px) {
+    .app { grid-template-columns: 1fr; }
+    aside { position: sticky; top: 0; z-index: 5; border-right: 0 !important; border-bottom: 1px solid var(--border); }
+    aside nav { display: flex; overflow-x: auto; gap: 6px; padding: 10px; }
+    aside nav a { white-space: nowrap; }
+    aside .brand { display: none; }
+    aside .whoami { display: none; }
+  }
+  aside {
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    padding: 18px 14px;
+    display: flex; flex-direction: column; gap: 16px;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .logo {
+    width: 36px; height: 36px; border-radius: 9px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-dark));
+    display: grid; place-items: center; font-size: 18px;
+  }
+  .brand h1 { font-size: 15px; margin: 0; }
+  .brand p  { font-size: 11px; margin: 0; color: var(--muted); }
+  aside nav { display: flex; flex-direction: column; gap: 2px; }
+  aside nav a {
+    padding: 10px 12px; border-radius: 8px;
+    color: var(--text); font-size: 14px;
+  }
+  aside nav a.active { background: var(--surface2); color: var(--accent); }
+  .whoami { margin-top: auto; font-size: 12px; color: var(--muted); padding: 8px 12px; }
+
+  main { padding: 26px 32px; max-width: 900px; }
+  @media (max-width: 640px) { main { padding: 18px 14px; } }
+
+  .pageTitle { font-size: 22px; margin: 0 0 18px; }
+
+  .panel {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 22px; margin-bottom: 18px;
+  }
+  .panel h3 { margin: 0 0 12px; font-size: 16px; }
+  .panel p { margin: 6px 0; color: var(--muted); font-size: 14px; line-height: 1.5; }
+  .panel p.lead { color: var(--text); }
+
+  .kv { display: grid; grid-template-columns: 160px 1fr; gap: 6px 12px; font-size: 14px; margin: 10px 0; }
+  .kv .k { color: var(--muted); }
+  .kv .v { color: var(--text); font-variant-numeric: tabular-nums; }
+
+  button, .btn {
+    padding: 9px 14px; border-radius: 8px; font-size: 14px;
+    background: var(--surface2); color: var(--text); border: 1px solid var(--border);
+    cursor: pointer; font-family: inherit;
+  }
+  button:hover, .btn:hover { border-color: var(--accent); }
+  button.primary, .btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button.primary:hover { background: var(--accent-dark); }
+  button.danger { color: var(--danger); border-color: var(--danger); background: transparent; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px;
+    background: var(--surface2); border: 1px solid var(--border); color: var(--muted);
+  }
+  .pill.success { color: var(--success); border-color: var(--success); }
+  .pill.warn { color: var(--accent); border-color: var(--accent); }
+  .pill.danger { color: var(--danger); border-color: var(--danger); }
+
+  #card-element {
+    padding: 12px; background: var(--bg);
+    border: 1px solid var(--border); border-radius: 8px;
+    margin: 10px 0;
+  }
+
+  .toast {
+    position: fixed; bottom: 24px; right: 24px; z-index: 200;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 12px 16px; font-size: 14px;
+    opacity: 0; transform: translateY(10px); transition: all .2s ease;
+  }
+  .toast.show { opacity: 1; transform: translateY(0); }
+  .toast.success { border-color: var(--success); }
+  .toast.error   { border-color: var(--danger); }
+
+  .hide { display: none !important; }
+
+  .banner {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 12px 14px; font-size: 13px; color: var(--muted);
+    margin-bottom: 18px;
+  }
+  .banner.test { border-color: var(--accent); color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <div class="brand">
+      <div class="logo">🔨</div>
+      <div>
+        <h1>Hadfield</h1>
+        <p>Admin panel</p>
+      </div>
+    </div>
+    <nav>
+      <a href="/admin/">Dashboard</a>
+      <a href="/admin/#entries">Time entries</a>
+      <a href="/admin/#workers">Workers</a>
+      <a href="/admin/#jobsites">Jobsites</a>
+      <a href="/admin/#tasks">Tasks</a>
+      <a href="/admin/#reports">Reports</a>
+      <a href="/admin/#qr">QR code</a>
+      <a href="/admin/#settings">Settings</a>
+      <a href="/admin/billing.html" class="active">Billing</a>
+    </nav>
+    <div class="whoami" id="whoami">…</div>
+  </aside>
+
+  <main>
+    <h2 class="pageTitle">Billing — Apps For Hire Family Tier</h2>
+
+    <div id="testModeBanner" class="banner test hide">
+      🧪 <strong>TEST MODE</strong> — this page is connected to Stripe's test environment.
+      Use card <code>4242&nbsp;4242&nbsp;4242&nbsp;4242</code>, any future expiry, any CVC, any ZIP.
+    </div>
+
+    <div id="loadingPanel" class="panel">
+      <p>Loading billing status…</p>
+    </div>
+
+    <!-- STATE: no card / needs setup ------------------------------------- -->
+    <div id="setupPanel" class="panel hide">
+      <h3>Subscribe to the Family tier</h3>
+      <p class="lead"><strong>$15.00 / month</strong> — billed to your card, auto-renews, cancel anytime.</p>
+      <p>This covers Apps For Hire hosting for Hadfield Properties (time tracker, admin panel, backups, domain). Includes all future feature updates.</p>
+
+      <button id="startSetupBtn" class="primary">Add payment method</button>
+
+      <div id="cardStage" class="hide" style="margin-top:18px;">
+        <p class="lead">Enter your card below. Your card is sent directly to Stripe — this page never sees it.</p>
+        <div id="card-element"></div>
+        <div class="actions">
+          <button id="confirmSubBtn" class="primary">Subscribe — $15.00 / mo</button>
+          <button id="cancelSetupBtn">Back</button>
+        </div>
+        <p class="muted" style="font-size:12px;margin-top:10px;">
+          By clicking Subscribe, you authorize Apps For Hire to charge your card
+          $15.00 every month until you cancel. You can cancel anytime from this page.
+        </p>
+      </div>
+    </div>
+
+    <!-- STATE: active subscription --------------------------------------- -->
+    <div id="activePanel" class="panel hide">
+      <h3>Subscription <span id="statusPill" class="pill"></span></h3>
+      <div class="kv">
+        <div class="k">Plan</div>                   <div class="v">Apps For Hire — Family Tier</div>
+        <div class="k">Price</div>                  <div class="v">$15.00 / month</div>
+        <div class="k">Next renewal</div>           <div class="v" id="nextRenewal">—</div>
+        <div class="k">Customer ID</div>            <div class="v" id="custId">—</div>
+        <div class="k">Subscription ID</div>        <div class="v" id="subId">—</div>
+        <div class="k">Last updated</div>           <div class="v" id="updatedAt">—</div>
+      </div>
+
+      <div class="actions">
+        <button id="updateCardBtn">Update card</button>
+        <button id="cancelBtn" class="danger">Cancel subscription</button>
+      </div>
+
+      <!-- Inline card-update UI (reuses Stripe Elements) -->
+      <div id="updateStage" class="hide" style="margin-top:18px;">
+        <h3>New card</h3>
+        <div id="update-card-element" style="padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;margin:10px 0;"></div>
+        <div class="actions">
+          <button id="confirmUpdateBtn" class="primary">Save new card</button>
+          <button id="cancelUpdateBtn">Back</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- STATE: cancelled / past due -------------------------------------- -->
+    <div id="endedPanel" class="panel hide">
+      <h3>Subscription <span id="endedPill" class="pill"></span></h3>
+      <p id="endedMsg" class="lead"></p>
+      <div class="actions">
+        <button id="resumeBtn" class="primary">Resubscribe</button>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script>
+// ─── Constants ──────────────────────────────────────────────────────────────
+const API = '/api';
+
+// ─── Tiny helpers ───────────────────────────────────────────────────────────
+const $ = s => document.querySelector(s);
+const show = el => el.classList.remove('hide');
+const hide = el => el.classList.add('hide');
+
+function toast(msg, kind) {
+  const t = $('#toast');
+  t.className = 'toast ' + (kind || '') + ' show';
+  t.textContent = msg;
+  setTimeout(() => t.classList.remove('show'), 3200);
+}
+
+function fmtDate(unixSec) {
+  if (!unixSec) return '—';
+  const d = new Date(unixSec * 1000);
+  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+function fmtWhen(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleString();
+}
+
+async function api(path, opts = {}) {
+  const r = await fetch(API + path, {
+    credentials: 'include',
+    headers: { 'content-type': 'application/json' },
+    ...opts,
+  });
+  if (r.status === 401 || r.status === 403) {
+    toast('Signed out — reloading', 'error');
+    setTimeout(() => location.reload(), 1200);
+    throw new Error('unauthenticated');
+  }
+  if (!r.ok) {
+    let body = {};
+    try { body = await r.json(); } catch {}
+    throw new Error(body.error || ('HTTP ' + r.status));
+  }
+  return r.json();
+}
+
+// ─── Page state ─────────────────────────────────────────────────────────────
+let stripe = null;           // Stripe.js instance
+let elements = null;         // Stripe Elements for the setup flow
+let cardElement = null;      // the Stripe Card element (setup)
+let updateElements = null;   // Elements for the update-card flow
+let updateCardElement = null;
+
+let billingState = null;     // last known state from /api/billing/status
+let setupClientSecret = null; // SetupIntent client_secret cached from server
+
+// ─── Initial load ───────────────────────────────────────────────────────────
+async function load() {
+  try {
+    const data = await api('/billing/status');
+    billingState = data.state || {};
+    const pub = data.publishable_key;
+
+    if (!pub) {
+      hide($('#loadingPanel'));
+      $('#setupPanel').innerHTML = '<h3>Billing not configured</h3>'
+        + '<p>The Stripe publishable key is missing. Ask the developer to run the billing setup steps in <code>BILLING_SETUP.md</code>.</p>';
+      show($('#setupPanel'));
+      return;
+    }
+
+    stripe = Stripe(pub);
+    if (pub.startsWith('pk_test_')) show($('#testModeBanner'));
+
+    renderByStatus();
+  } catch (e) {
+    hide($('#loadingPanel'));
+    toast('Could not load billing: ' + e.message, 'error');
+  }
+}
+
+function renderByStatus() {
+  hide($('#loadingPanel'));
+  hide($('#setupPanel'));
+  hide($('#activePanel'));
+  hide($('#endedPanel'));
+
+  const s = billingState || {};
+  const status = s.status || 'none';
+
+  if (status === 'none' || status === 'incomplete' || status === 'incomplete_expired') {
+    show($('#setupPanel'));
+    return;
+  }
+
+  if (status === 'active' || status === 'trialing') {
+    fillActivePanel(s);
+    show($('#activePanel'));
+    return;
+  }
+
+  if (status === 'past_due' || status === 'unpaid') {
+    $('#endedPill').textContent = status;
+    $('#endedPill').className = 'pill danger';
+    $('#endedMsg').textContent =
+      'Your last payment failed. Update your card to restore service.';
+    show($('#endedPanel'));
+    // When they click Resume, reuse the setup flow to collect a fresh card.
+    $('#resumeBtn').onclick = () => {
+      hide($('#endedPanel'));
+      show($('#setupPanel'));
+    };
+    return;
+  }
+
+  if (status === 'canceled') {
+    $('#endedPill').textContent = 'canceled';
+    $('#endedPill').className = 'pill';
+    $('#endedMsg').textContent =
+      'Your subscription ended on ' + fmtDate(s.current_period_end) + '.';
+    show($('#endedPanel'));
+    $('#resumeBtn').onclick = () => {
+      hide($('#endedPanel'));
+      show($('#setupPanel'));
+    };
+    return;
+  }
+
+  // Fallback — unknown status: just show setup so they can fix it
+  show($('#setupPanel'));
+}
+
+function fillActivePanel(s) {
+  const pill = $('#statusPill');
+  pill.textContent = s.status;
+  pill.className = 'pill ' + (s.status === 'active' ? 'success' : 'warn');
+
+  $('#nextRenewal').textContent = s.cancel_at_period_end
+    ? 'Cancels on ' + fmtDate(s.current_period_end)
+    : fmtDate(s.current_period_end);
+  $('#custId').textContent    = s.customer_id || '—';
+  $('#subId').textContent     = s.subscription_id || '—';
+  $('#updatedAt').textContent = fmtWhen(s.updated_at);
+
+  // If cancel-at-period-end is already set, hide the Cancel button
+  $('#cancelBtn').classList.toggle('hide', !!s.cancel_at_period_end);
+}
+
+// ─── Setup flow (new subscription) ──────────────────────────────────────────
+$('#startSetupBtn').onclick = async () => {
+  $('#startSetupBtn').disabled = true;
+  try {
+    const r = await api('/billing/setup-intent', { method: 'POST' });
+    setupClientSecret = r.client_secret;
+    elements = stripe.elements();
+    cardElement = elements.create('card', {
+      style: {
+        base: {
+          color: '#f1f5f9',
+          fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
+          fontSize: '15px',
+          '::placeholder': { color: '#94a3b8' },
+        },
+      },
+    });
+    cardElement.mount('#card-element');
+    show($('#cardStage'));
+    $('#startSetupBtn').classList.add('hide');
+  } catch (e) {
+    $('#startSetupBtn').disabled = false;
+    toast('Could not start setup: ' + e.message, 'error');
+  }
+};
+
+$('#cancelSetupBtn').onclick = () => {
+  if (cardElement) { try { cardElement.destroy(); } catch {} cardElement = null; }
+  hide($('#cardStage'));
+  $('#startSetupBtn').classList.remove('hide');
+  $('#startSetupBtn').disabled = false;
+};
+
+$('#confirmSubBtn').onclick = async () => {
+  if (!setupClientSecret) return;
+  $('#confirmSubBtn').disabled = true;
+  try {
+    const res = await stripe.confirmCardSetup(setupClientSecret, {
+      payment_method: { card: cardElement },
+    });
+    if (res.error) throw new Error(res.error.message || 'Card declined');
+
+    const paymentMethodId = res.setupIntent.payment_method;
+    const r = await api('/billing/confirm-subscription', {
+      method: 'POST',
+      body: JSON.stringify({ payment_method_id: paymentMethodId }),
+    });
+    toast('Subscription started', 'success');
+    billingState = r.state;
+    renderByStatus();
+  } catch (e) {
+    toast(e.message, 'error');
+  } finally {
+    $('#confirmSubBtn').disabled = false;
+  }
+};
+
+// ─── Update card flow (already-subscribed) ──────────────────────────────────
+$('#updateCardBtn').onclick = async () => {
+  $('#updateCardBtn').disabled = true;
+  try {
+    const r = await api('/billing/update-card', { method: 'POST' });
+    setupClientSecret = r.client_secret;
+    updateElements = stripe.elements();
+    updateCardElement = updateElements.create('card', {
+      style: {
+        base: {
+          color: '#f1f5f9',
+          fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
+          fontSize: '15px',
+          '::placeholder': { color: '#94a3b8' },
+        },
+      },
+    });
+    updateCardElement.mount('#update-card-element');
+    show($('#updateStage'));
+    $('#updateCardBtn').classList.add('hide');
+    $('#cancelBtn').classList.add('hide');
+  } catch (e) {
+    toast('Could not start card update: ' + e.message, 'error');
+  } finally {
+    $('#updateCardBtn').disabled = false;
+  }
+};
+
+$('#cancelUpdateBtn').onclick = () => {
+  if (updateCardElement) { try { updateCardElement.destroy(); } catch {} updateCardElement = null; }
+  hide($('#updateStage'));
+  $('#updateCardBtn').classList.remove('hide');
+  if (billingState && !billingState.cancel_at_period_end) $('#cancelBtn').classList.remove('hide');
+};
+
+$('#confirmUpdateBtn').onclick = async () => {
+  if (!setupClientSecret) return;
+  $('#confirmUpdateBtn').disabled = true;
+  try {
+    const res = await stripe.confirmCardSetup(setupClientSecret, {
+      payment_method: { card: updateCardElement },
+    });
+    if (res.error) throw new Error(res.error.message || 'Card declined');
+
+    const paymentMethodId = res.setupIntent.payment_method;
+    const r = await api('/billing/confirm-subscription', {
+      method: 'POST',
+      body: JSON.stringify({ payment_method_id: paymentMethodId }),
+    });
+    toast('Card updated', 'success');
+    billingState = r.state;
+    hide($('#updateStage'));
+    renderByStatus();
+  } catch (e) {
+    toast(e.message, 'error');
+  } finally {
+    $('#confirmUpdateBtn').disabled = false;
+  }
+};
+
+// ─── Cancel at period end ───────────────────────────────────────────────────
+$('#cancelBtn').onclick = async () => {
+  const when = fmtDate(billingState && billingState.current_period_end);
+  if (!confirm('Cancel subscription? Access continues until ' + when + ', then stops. You can resubscribe anytime.')) return;
+  $('#cancelBtn').disabled = true;
+  try {
+    const r = await api('/billing/cancel', { method: 'POST' });
+    billingState = r.state;
+    toast('Subscription will cancel on ' + when, 'success');
+    renderByStatus();
+  } catch (e) {
+    toast(e.message, 'error');
+  } finally {
+    $('#cancelBtn').disabled = false;
+  }
+};
+
+// ─── Go ─────────────────────────────────────────────────────────────────────
+load();
+</script>
+</body>
+</html>
