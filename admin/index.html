@@ -218,7 +218,8 @@
         <table id="entriesTable">
           <thead><tr>
             <th>Worker</th><th>Jobsite</th><th>Task</th>
-            <th>Clock in</th><th>Clock out</th><th>Hours</th>
+            <th>Clock in</th><th>Lunch out</th><th>Lunch in</th><th>Clock out</th>
+            <th title="Net = clock_out − clock_in − lunch">Hours</th>
             <th>Notes</th><th></th>
           </tr></thead>
           <tbody></tbody>
@@ -526,22 +527,44 @@ async function refreshEntries() {
   try {
     const r = await api('/entries?' + q.toString());
     $('#entriesTable tbody').innerHTML = r.entries.map(e => {
-      const hrs = e.clock_out ? fmtHours(e.clock_out - e.clock_in) : '<span class="pill warn">open</span>';
+      // Net hours = (clock_out - clock_in) minus lunch if BOTH lunch_out and lunch_in are set.
+      // If lunch is half-populated (e.g. forgot lunch_in), we show gross and flag it.
+      let hrsCell;
+      if (!e.clock_out) {
+        hrsCell = '<span class="pill warn">open</span>';
+      } else {
+        const gross = e.clock_out - e.clock_in;
+        const hasFullLunch = e.lunch_out && e.lunch_in;
+        const halfLunch = (e.lunch_out && !e.lunch_in) || (!e.lunch_out && e.lunch_in);
+        if (hasFullLunch) {
+          const lunchMs = e.lunch_in - e.lunch_out;
+          const net = gross - lunchMs;
+          hrsCell = `${fmtHours(net)} <span class="muted" title="Gross ${fmtHours(gross)} − lunch ${fmtHours(lunchMs)}">net</span>`;
+        } else if (halfLunch) {
+          hrsCell = `${fmtHours(gross)} <span class="pill warn" title="Lunch punches incomplete — only one of lunch_out/lunch_in is set">⚠ lunch</span>`;
+        } else {
+          hrsCell = fmtHours(gross);
+        }
+      }
       const edited = e.edited_by_admin ? ' <span class="pill" title="Edited by admin">✎</span>' : '';
+      const selfEdited = e.edited_by_worker ? ' <span class="pill" title="Edited by the worker on the review screen">w✎</span>' : '';
+      const finishedPill = e.worker_finished_day ? ' <span class="pill success" title="Worker tapped Finish Day">✓</span>' : '';
       return `<tr>
-        <td>${esc(e.worker_name)}${edited}</td>
+        <td>${esc(e.worker_name)}${edited}${selfEdited}${finishedPill}</td>
         <td>${esc(e.jobsite_name || '—')}</td>
         <td>${esc(e.task_name || '—')}</td>
         <td>${fmtTs(e.clock_in)}</td>
+        <td>${e.lunch_out ? fmtTs(e.lunch_out) : '<span class="muted">—</span>'}</td>
+        <td>${e.lunch_in ? fmtTs(e.lunch_in) : '<span class="muted">—</span>'}</td>
         <td>${e.clock_out ? fmtTs(e.clock_out) : '<span class="muted">—</span>'}</td>
-        <td>${hrs}</td>
+        <td>${hrsCell}</td>
         <td class="muted" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(e.notes || '')}</td>
         <td>
           <button class="ghost" onclick="editEntry(${e.id})">✎</button>
           <button class="ghost" onclick="deleteEntry(${e.id})">🗑</button>
         </td>
       </tr>`;
-    }).join('') || `<tr><td colspan="8" class="muted" style="text-align:center;padding:20px;">No entries in this range</td></tr>`;
+    }).join('') || `<tr><td colspan="10" class="muted" style="text-align:center;padding:20px;">No entries in this range</td></tr>`;
     // jump-to from dashboard anomalies
     const jump = sessionStorage.getItem('jump-entry');
     if (jump) {
@@ -564,14 +587,42 @@ window.editEntry = async function (id) {
     <select id="mJob"><option value="">—</option>${state.jobsites.map(j => `<option value="${j.id}" ${j.id===e.jobsite_id?'selected':''}>${esc(j.name)}</option>`).join('')}</select>
     <label class="field">Task</label>
     <select id="mTask"><option value="">—</option>${state.tasks.map(t => `<option value="${t.id}" ${t.id===e.task_id?'selected':''}>${esc(t.name)}</option>`).join('')}</select>
+
     <div class="row2" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
       <div><label class="field">Clock-in date</label><input id="mInDate" type="date" value="${toDateInput(e.clock_in)}" /></div>
       <div><label class="field">Clock-in time</label><input id="mInTime" type="time" value="${hhmm(e.clock_in)}" /></div>
+    </div>
+
+    <div style="border-top:1px solid var(--border);margin:14px 0 4px;padding-top:10px;">
+      <div style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;">Lunch (optional)</div>
+    </div>
+    <div class="row2" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+      <div><label class="field">Lunch-out date</label><input id="mLoDate" type="date" value="${e.lunch_out ? toDateInput(e.lunch_out) : ''}" /></div>
+      <div><label class="field">Lunch-out time</label><input id="mLoTime" type="time" value="${e.lunch_out ? hhmm(e.lunch_out) : ''}" /></div>
+      <div><label class="field">Lunch-in date</label><input id="mLiDate" type="date" value="${e.lunch_in ? toDateInput(e.lunch_in) : ''}" /></div>
+      <div><label class="field">Lunch-in time</label><input id="mLiTime" type="time" value="${e.lunch_in ? hhmm(e.lunch_in) : ''}" /></div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:6px;">
+      <button type="button" class="ghost" onclick="document.getElementById('mLoDate').value='';document.getElementById('mLoTime').value='';">Clear lunch-out</button>
+      <button type="button" class="ghost" onclick="document.getElementById('mLiDate').value='';document.getElementById('mLiTime').value='';">Clear lunch-in</button>
+    </div>
+
+    <div style="border-top:1px solid var(--border);margin:14px 0 4px;padding-top:10px;"></div>
+    <div class="row2" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
       <div><label class="field">Clock-out date</label><input id="mOutDate" type="date" value="${e.clock_out ? toDateInput(e.clock_out) : ''}" /></div>
       <div><label class="field">Clock-out time</label><input id="mOutTime" type="time" value="${e.clock_out ? hhmm(e.clock_out) : ''}" /></div>
     </div>
+
+    <label class="field">
+      <input type="checkbox" id="mUnlock" ${e.worker_finished_day ? '' : 'checked disabled'} style="width:auto;margin-right:6px;" />
+      ${e.worker_finished_day
+        ? 'Unlock so the worker can re-edit today (clears Finish-Day)'
+        : `<span class="muted">Not locked by worker — leave unchecked</span>`}
+    </label>
+
     <label class="field">Notes</label>
     <textarea id="mNotes" rows="2">${esc(e.notes || '')}</textarea>
+
     <div class="modal-actions">
       <button onclick="closeModal()">Cancel</button>
       <button class="primary" onclick="saveEntry(${id})">Save</button>
@@ -583,13 +634,34 @@ window.saveEntry = async function (id) {
   try {
     const ci = combineDT($('#mInDate').value, $('#mInTime').value);
     const co = ($('#mOutDate').value && $('#mOutTime').value) ? combineDT($('#mOutDate').value, $('#mOutTime').value) : null;
-    await api('/entries/' + id, { method: 'PATCH', body: JSON.stringify({
+    const lo = ($('#mLoDate').value && $('#mLoTime').value) ? combineDT($('#mLoDate').value, $('#mLoTime').value) : null;
+    const li = ($('#mLiDate').value && $('#mLiTime').value) ? combineDT($('#mLiDate').value, $('#mLiTime').value) : null;
+
+    // Basic client-side ordering check — server enforces this too.
+    if (co && co <= ci)                 return toast('Clock-out must be after clock-in', 'error');
+    if (lo && (lo <= ci))               return toast('Lunch-out must be after clock-in', 'error');
+    if (li && lo && li <= lo)           return toast('Lunch-in must be after lunch-out', 'error');
+    if (li && !lo)                      return toast('Lunch-in requires lunch-out', 'error');
+    if (co && li && co <= li)           return toast('Clock-out must be after lunch-in', 'error');
+    if (co && lo && !li && co <= lo)    return toast('Clock-out must be after lunch-out (or set lunch-in)', 'error');
+
+    const body = {
       worker_id: Number($('#mWorker').value),
       jobsite_id: $('#mJob').value || null,
       task_id: $('#mTask').value || null,
-      clock_in: ci, clock_out: co,
+      clock_in: ci,
+      clock_out: co,
+      lunch_out: lo,
+      lunch_in: li,
       notes: $('#mNotes').value,
-    })});
+    };
+    // Unlock toggle: only send worker_finished_day:null if the row is currently locked AND user checked the box.
+    const unlockBox = document.getElementById('mUnlock');
+    if (unlockBox && !unlockBox.disabled && unlockBox.checked) {
+      body.worker_finished_day = null;
+    }
+
+    await api('/entries/' + id, { method: 'PATCH', body: JSON.stringify(body) });
     toast('Saved', 'success');
     closeModal(); await refreshEntries();
   } catch (e) { toast(e.message, 'error'); }
@@ -619,9 +691,24 @@ $('#entAdd').addEventListener('click', () => {
     <div class="row2" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
       <div><label class="field">Clock-in date</label><input id="mInDate" type="date" value="${toDateInput(Date.now())}" /></div>
       <div><label class="field">Clock-in time</label><input id="mInTime" type="time" value="07:00" /></div>
+    </div>
+
+    <div style="border-top:1px solid var(--border);margin:14px 0 4px;padding-top:10px;">
+      <div style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;">Lunch (optional — leave blank to skip)</div>
+    </div>
+    <div class="row2" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+      <div><label class="field">Lunch-out date</label><input id="mLoDate" type="date" /></div>
+      <div><label class="field">Lunch-out time</label><input id="mLoTime" type="time" /></div>
+      <div><label class="field">Lunch-in date</label><input id="mLiDate" type="date" /></div>
+      <div><label class="field">Lunch-in time</label><input id="mLiTime" type="time" /></div>
+    </div>
+
+    <div style="border-top:1px solid var(--border);margin:14px 0 4px;padding-top:10px;"></div>
+    <div class="row2" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
       <div><label class="field">Clock-out date</label><input id="mOutDate" type="date" value="${toDateInput(Date.now())}" /></div>
       <div><label class="field">Clock-out time</label><input id="mOutTime" type="time" value="15:30" /></div>
     </div>
+
     <label class="field">Notes</label>
     <textarea id="mNotes" rows="2"></textarea>
     <div class="modal-actions">
@@ -633,11 +720,21 @@ $('#entAdd').addEventListener('click', () => {
     try {
       const ci = combineDT($('#mInDate').value, $('#mInTime').value);
       const co = ($('#mOutDate').value && $('#mOutTime').value) ? combineDT($('#mOutDate').value, $('#mOutTime').value) : null;
+      const lo = ($('#mLoDate').value && $('#mLoTime').value) ? combineDT($('#mLoDate').value, $('#mLoTime').value) : null;
+      const li = ($('#mLiDate').value && $('#mLiTime').value) ? combineDT($('#mLiDate').value, $('#mLiTime').value) : null;
+
+      if (co && co <= ci)             return toast('Clock-out must be after clock-in', 'error');
+      if (lo && lo <= ci)             return toast('Lunch-out must be after clock-in', 'error');
+      if (li && lo && li <= lo)       return toast('Lunch-in must be after lunch-out', 'error');
+      if (li && !lo)                  return toast('Lunch-in requires lunch-out', 'error');
+      if (co && li && co <= li)       return toast('Clock-out must be after lunch-in', 'error');
+
       await api('/entries', { method: 'POST', body: JSON.stringify({
         worker_id: Number($('#mWorker').value),
         jobsite_id: $('#mJob').value || null,
         task_id: $('#mTask').value || null,
         clock_in: ci, clock_out: co,
+        lunch_out: lo, lunch_in: li,
         notes: $('#mNotes').value,
       })});
       toast('Added', 'success'); closeModal(); await refreshEntries();
@@ -885,7 +982,12 @@ $('#rptPdf').addEventListener('click', async () => {
     const r = await api('/entries?' + q.toString());
     const worker = state.workers.find(w => w.id === workerId);
     const completed = r.entries.filter(e => e.clock_out).sort((a, b) => a.clock_in - b.clock_in);
-    const totalHours = completed.reduce((a, e) => a + (e.clock_out - e.clock_in), 0) / 3600000;
+    const totalNetMs = completed.reduce((acc, e) => {
+      const gross = e.clock_out - e.clock_in;
+      const lunch = (e.lunch_out && e.lunch_in) ? (e.lunch_in - e.lunch_out) : 0;
+      return acc + Math.max(0, gross - lunch);
+    }, 0);
+    const totalHours = totalNetMs / 3600000;
     const totalPay = (worker?.hourly_rate || 0) * totalHours;
     await generateTimesheetPdf({
       company: state.settings.company_name || 'Hadfield Properties LLC',
@@ -914,7 +1016,10 @@ $('#psShow').addEventListener('click', async () => {
       if (!e.clock_out) continue;
       const id = e.worker_id;
       byWorker[id] = byWorker[id] || { name: e.worker_name, ms: 0, count: 0 };
-      byWorker[id].ms += e.clock_out - e.clock_in;
+      // Net hours: subtract lunch only when BOTH punches are present.
+      const gross = e.clock_out - e.clock_in;
+      const lunch = (e.lunch_out && e.lunch_in) ? (e.lunch_in - e.lunch_out) : 0;
+      byWorker[id].ms += Math.max(0, gross - lunch);
       byWorker[id].count++;
     }
     const rows = Object.values(byWorker).sort((a, b) => b.ms - a.ms);
@@ -955,19 +1060,23 @@ async function generateTimesheetPdf({ company, worker, from, to, entries, totalH
   page.drawText(`Period: ${fmtDate(from)} to ${fmtDate(to)}`, { x: margin, y, size: 11, font });
   y -= 24;
 
-  // Header row
+  // Header row — now includes Lunch-out / Lunch-in between In and Out.
   const cols = [
-    { k: 'Date',    x: margin },
-    { k: 'Jobsite', x: margin + 80 },
-    { k: 'Task',    x: margin + 200 },
-    { k: 'In',      x: margin + 300 },
-    { k: 'Out',     x: margin + 360 },
-    { k: 'Hours',   x: margin + 430 },
+    { k: 'Date',      x: margin },
+    { k: 'Jobsite',   x: margin + 70 },
+    { k: 'Task',      x: margin + 180 },
+    { k: 'In',        x: margin + 270 },
+    { k: 'L-out',     x: margin + 320 },
+    { k: 'L-in',      x: margin + 370 },
+    { k: 'Out',       x: margin + 420 },
+    { k: 'Net hr',    x: margin + 470 },
   ];
   cols.forEach(c => page.drawText(c.k, { x: c.x, y, size: 10, font: bold }));
   y -= 6;
   page.drawLine({ start: { x: margin, y }, end: { x: 562, y }, thickness: 0.8, color: rgb(0.4, 0.4, 0.4) });
   y -= 12;
+
+  const fmtT = (ts) => ts ? new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—';
 
   for (const e of entries) {
     if (y < 80) {
@@ -975,23 +1084,27 @@ async function generateTimesheetPdf({ company, worker, from, to, entries, totalH
       page.drawText('(continued)', { x: margin, y, size: 10, font });
       y -= 20;
     }
-    const hours = ((e.clock_out - e.clock_in) / 3600000).toFixed(2);
-    const inT = new Date(e.clock_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const outT = new Date(e.clock_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const gross = e.clock_out - e.clock_in;
+    const lunch = (e.lunch_out && e.lunch_in) ? (e.lunch_in - e.lunch_out) : 0;
+    const netHours = (Math.max(0, gross - lunch) / 3600000).toFixed(2);
     const row = [
       fmtDate(e.clock_in),
-      (e.jobsite_name || '—').slice(0, 18),
-      (e.task_name || '—').slice(0, 14),
-      inT, outT, hours,
+      (e.jobsite_name || '—').slice(0, 16),
+      (e.task_name || '—').slice(0, 12),
+      fmtT(e.clock_in),
+      fmtT(e.lunch_out),
+      fmtT(e.lunch_in),
+      fmtT(e.clock_out),
+      netHours,
     ];
-    row.forEach((v, i) => page.drawText(String(v), { x: cols[i].x, y, size: 10, font }));
+    row.forEach((v, i) => page.drawText(String(v), { x: cols[i].x, y, size: 9, font }));
     y -= 14;
   }
 
   y -= 12;
   page.drawLine({ start: { x: margin, y }, end: { x: 562, y }, thickness: 0.8 });
   y -= 16;
-  page.drawText(`Total hours: ${totalHours.toFixed(2)}`, { x: margin, y, size: 12, font: bold });
+  page.drawText(`Total net hours (lunch subtracted): ${totalHours.toFixed(2)}`, { x: margin, y, size: 12, font: bold });
   if (totalPay > 0) {
     y -= 14;
     page.drawText(`Estimated pay: $${totalPay.toFixed(2)} @ $${worker.hourly_rate}/hr`, { x: margin, y, size: 11, font });
