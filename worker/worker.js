@@ -311,9 +311,19 @@ async function getBillingState(env) {
 
 async function setBillingState(env, patch) {
   const current = await getBillingState(env);
-  const next = { ...current, ...patch, updated_at: Math.floor(Date.now() / 1000) };
+  // ISO-8601 string so the frontend can pass it straight to `new Date(...)`.
+  const next = { ...current, ...patch, updated_at: new Date().toISOString() };
   await env.HADFIELD_KV.put(BILLING_KV_KEY, JSON.stringify(next));
   return next;
+}
+
+// Stripe moved `current_period_end` off the subscription top-level onto the
+// subscription item in API version 2024-12-18. We try both so we work on old
+// + new API versions (unix seconds, or null if neither is populated).
+function periodEndFromSub(sub) {
+  return sub?.current_period_end
+      || sub?.items?.data?.[0]?.current_period_end
+      || null;
 }
 
 // ─── Route handlers ──────────────────────────────────────────────────────────
@@ -956,7 +966,7 @@ async function billingConfirmSubscription(req, env) {
       });
       const next = await setBillingState(env, {
         status: sub.status,
-        current_period_end: sub.current_period_end,
+        current_period_end: periodEndFromSub(sub),
         cancel_at_period_end: !!sub.cancel_at_period_end,
       });
       return json({ state: next, reactivated: true });
@@ -973,7 +983,7 @@ async function billingConfirmSubscription(req, env) {
     const next = await setBillingState(env, {
       subscription_id: sub.id,
       status: sub.status,
-      current_period_end: sub.current_period_end,
+      current_period_end: periodEndFromSub(sub),
       cancel_at_period_end: !!sub.cancel_at_period_end,
     });
     return json({ state: next, subscribed: true });
@@ -1002,7 +1012,7 @@ async function billingCancel(req, env) {
     });
     const next = await setBillingState(env, {
       status: sub.status,
-      current_period_end: sub.current_period_end,
+      current_period_end: periodEndFromSub(sub),
       cancel_at_period_end: !!sub.cancel_at_period_end,
     });
     return json({ state: next });
@@ -1035,7 +1045,7 @@ async function stripeWebhook(req, env) {
         await setBillingState(env, {
           subscription_id: sub.id,
           status: sub.status,
-          current_period_end: sub.current_period_end,
+          current_period_end: periodEndFromSub(sub),
           cancel_at_period_end: !!sub.cancel_at_period_end,
         });
         break;
@@ -1045,7 +1055,7 @@ async function stripeWebhook(req, env) {
         await setBillingState(env, {
           status: 'canceled',
           subscription_id: sub.id,
-          current_period_end: sub.current_period_end,
+          current_period_end: periodEndFromSub(sub),
           cancel_at_period_end: false,
         });
         break;
