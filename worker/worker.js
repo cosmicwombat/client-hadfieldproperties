@@ -24,11 +24,21 @@
 //   GET  /api/admin/export/csv          — QuickBooks CSV
 //   GET  /api/admin/settings            GET/PATCH
 //
+//   Billing routes (Cloudflare Access JWT required, EXCEPT the webhook):
+//   GET  /api/billing/status                 — current subscription state
+//   POST /api/billing/setup-intent           — create Stripe SetupIntent for new card
+//   POST /api/billing/confirm-subscription   — attach card + create/update subscription
+//   POST /api/billing/update-card            — collect a new card (reuses setup-intent flow)
+//   POST /api/billing/cancel                 — cancel at period end
+//   POST /api/stripe/webhook                 — Stripe event hook (verified by HMAC signature, NOT CF Access)
+//
 // Auth:
 //   Worker side: pick name → /verify-pin returns a signed cookie (HS256 JWT, 12h).
 //   Admin side: Cloudflare Access TOTP 2FA. We trust Cf-Access-Jwt-Assertion and
 //   verify against CF_ACCESS_AUD + JWKS from the team domain. ADMIN_EMAILS is a
 //   belt-and-suspenders allowlist.
+//   Stripe webhook: CF Access must NOT protect /api/stripe/*. Signature
+//   verification happens in code using STRIPE_WEBHOOK_SECRET.
 
 // ─── Utilities ───────────────────────────────────────────────────────────────
 
@@ -207,6 +217,105 @@ async function pickWorkerActive(env, workerId) {
   return r || null;
 }
 
+// ─── Stripe helpers ──────────────────────────────────────────────────────────
+// Ported from the main appsforhire-worker so both workers use the same proven
+// signature check. Stripe sends a `Stripe-Signature: t=...,v1=...` header; we
+// HMAC-SHA256 "<t>.<rawBody>" with the webhook secret and compare to v1.
+
+async function verifyStripeSignature(payload, sigHeader, secret) {
+  try {
+    const parts = Object.fromEntries(sigHeader.split(',').map(p => p.split('=')));
+    const { t: timestamp, v1: signature } = parts;
+    if (!timestamp || !signature) return false;
+
+    const key = await crypto.subtle.importKey(
+      'raw', enc.encode(secret),
+      { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
+    );
+    const signed = await crypto.subtle.sign('HMAC', key, enc.encode(`${timestamp}.${payload}`));
+    const expected = Array.from(new Uint8Array(signed))
+      .map(b => b.toString(16).padStart(2, '0')).join('');
+    return expected === signature;
+  } catch {
+    return false;
+  }
+}
+
+// Stripe's REST API takes application/x-www-form-urlencoded bodies with bracket
+// notation for nested objects/arrays: `metadata[foo]=bar`, `items[0][price]=...`.
+function stripeFormEncode(obj, prefix = '') {
+  const parts = [];
+  for (const [k, v] of Object.entries(obj)) {
+    if (v === null || v === undefined) continue;
+    const key = prefix ? `${prefix}[${k}]` : k;
+    if (Array.isArray(v)) {
+      v.forEach((item, i) => {
+        const arrKey = `${key}[${i}]`;
+        if (item !== null && typeof item === 'object') {
+          parts.push(stripeFormEncode(item, arrKey));
+        } else {
+          parts.push(`${encodeURIComponent(arrKey)}=${encodeURIComponent(item)}`);
+        }
+      });
+    } else if (typeof v === 'object') {
+      parts.push(stripeFormEncode(v, key));
+    } else {
+      parts.push(`${encodeURIComponent(key)}=${encodeURIComponent(v)}`);
+    }
+  }
+  return parts.join('&');
+}
+
+async function stripeApi(env, method, path, bodyParams) {
+  if (!env.STRIPE_SECRET_KEY) throw new Error('STRIPE_SECRET_KEY not configured');
+  const init = {
+    method,
+    headers: { Authorization: `Bearer ${env.STRIPE_SECRET_KEY}` },
+  };
+  if (bodyParams) {
+    init.body = stripeFormEncode(bodyParams);
+    init.headers['content-type'] = 'application/x-www-form-urlencoded';
+  }
+  const r = await fetch(`https://api.stripe.com${path}`, init);
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const msg = data?.error?.message || `Stripe ${r.status}`;
+    const e = new Error(`Stripe ${method} ${path} failed: ${msg}`);
+    e.status = r.status;
+    e.stripeError = data?.error || null;
+    throw e;
+  }
+  return data;
+}
+
+// ─── Billing state (stored as one JSON blob in HADFIELD_KV) ──────────────────
+
+const BILLING_KV_KEY = 'billing:state';
+
+const EMPTY_BILLING_STATE = {
+  customer_id: null,
+  subscription_id: null,
+  status: 'none',                 // none | trialing | active | past_due | canceled | unpaid
+  current_period_end: null,       // unix seconds
+  cancel_at_period_end: false,
+  last_invoice_id: null,
+  updated_at: null,
+};
+
+async function getBillingState(env) {
+  const raw = await env.HADFIELD_KV.get(BILLING_KV_KEY);
+  if (!raw) return { ...EMPTY_BILLING_STATE };
+  try { return { ...EMPTY_BILLING_STATE, ...JSON.parse(raw) }; }
+  catch { return { ...EMPTY_BILLING_STATE }; }
+}
+
+async function setBillingState(env, patch) {
+  const current = await getBillingState(env);
+  const next = { ...current, ...patch, updated_at: Math.floor(Date.now() / 1000) };
+  await env.HADFIELD_KV.put(BILLING_KV_KEY, JSON.stringify(next));
+  return next;
+}
+
 // ─── Route handlers ──────────────────────────────────────────────────────────
 
 async function handleHealth(env) {
@@ -220,6 +329,10 @@ async function handleHealth(env) {
       CF_ACCESS_AUD: !!env.CF_ACCESS_AUD,
       CF_ACCESS_TEAM: !!env.CF_ACCESS_TEAM,
       ADMIN_EMAILS: !!env.ADMIN_EMAILS,
+      STRIPE_SECRET_KEY:      !!env.STRIPE_SECRET_KEY,
+      STRIPE_PUBLISHABLE_KEY: !!env.STRIPE_PUBLISHABLE_KEY,
+      STRIPE_PRICE_FAMILY:    !!env.STRIPE_PRICE_FAMILY,
+      STRIPE_WEBHOOK_SECRET:  !!env.STRIPE_WEBHOOK_SECRET,
     },
     ts: Date.now(),
   };
@@ -766,6 +879,207 @@ async function adminSettings(req, env, method) {
   return err(405, 'Method not allowed');
 }
 
+// ─── Billing route handlers ──────────────────────────────────────────────────
+// All /api/billing/* handlers go through requireAdmin — the admin signed in via
+// CF Access is the only human who can trigger Stripe operations.
+// The webhook endpoint (/api/stripe/webhook) is NOT admin-guarded — Stripe's
+// servers can't carry a CF Access JWT, so it relies on HMAC signature
+// verification in code instead.
+
+async function billingStatus(req, env) {
+  const a = await requireAdmin(req, env);
+  if (!a.ok) return err(a.status, a.msg);
+  const state = await getBillingState(env);
+  // Also return the Stripe publishable key so the admin frontend can init
+  // Stripe.js with a single fetch. Publishable key is safe to expose.
+  return json({ state, publishable_key: env.STRIPE_PUBLISHABLE_KEY || null });
+}
+
+// Create (or fetch) the Stripe Customer for Hadfield Properties LLC, then
+// create a SetupIntent the frontend will use to collect the card.
+async function billingSetupIntent(req, env) {
+  const a = await requireAdmin(req, env);
+  if (!a.ok) return err(a.status, a.msg);
+
+  try {
+    let state = await getBillingState(env);
+    if (!state.customer_id) {
+      const cust = await stripeApi(env, 'POST', '/v1/customers', {
+        name: 'Hadfield Properties LLC',
+        email: a.email,
+        description: 'Apps For Hire — Family Tier subscription',
+        metadata: { platform: 'appsforhire', account: 'hadfield' },
+      });
+      state = await setBillingState(env, { customer_id: cust.id });
+    }
+
+    const si = await stripeApi(env, 'POST', '/v1/setup_intents', {
+      customer: state.customer_id,
+      payment_method_types: ['card'],
+      usage: 'off_session',
+    });
+
+    return json({ client_secret: si.client_secret, customer_id: state.customer_id });
+  } catch (e) {
+    return err(e.status || 500, e.message);
+  }
+}
+
+// After the frontend confirms the SetupIntent, it sends us the resulting
+// payment_method ID. We attach it, make it the default, then either update
+// the existing subscription or create a brand new one against STRIPE_PRICE_FAMILY.
+async function billingConfirmSubscription(req, env) {
+  const a = await requireAdmin(req, env);
+  if (!a.ok) return err(a.status, a.msg);
+  if (!env.STRIPE_PRICE_FAMILY) return err(500, 'STRIPE_PRICE_FAMILY not configured');
+
+  const body = await req.json().catch(() => ({}));
+  const { payment_method_id } = body;
+  if (!payment_method_id) return err(400, 'payment_method_id required');
+
+  try {
+    const state = await getBillingState(env);
+    if (!state.customer_id) return err(400, 'No Stripe customer yet — call /setup-intent first');
+
+    await stripeApi(env, 'POST', `/v1/payment_methods/${encodeURIComponent(payment_method_id)}/attach`, {
+      customer: state.customer_id,
+    });
+    await stripeApi(env, 'POST', `/v1/customers/${encodeURIComponent(state.customer_id)}`, {
+      invoice_settings: { default_payment_method: payment_method_id },
+    });
+
+    // Already subscribed? Just update default payment method on the sub.
+    if (state.subscription_id && ['active', 'past_due', 'trialing', 'unpaid'].includes(state.status)) {
+      const sub = await stripeApi(env, 'POST', `/v1/subscriptions/${encodeURIComponent(state.subscription_id)}`, {
+        default_payment_method: payment_method_id,
+        cancel_at_period_end: 'false',  // re-activating resets any scheduled cancel
+      });
+      const next = await setBillingState(env, {
+        status: sub.status,
+        current_period_end: sub.current_period_end,
+        cancel_at_period_end: !!sub.cancel_at_period_end,
+      });
+      return json({ state: next, reactivated: true });
+    }
+
+    // New subscription.
+    const sub = await stripeApi(env, 'POST', '/v1/subscriptions', {
+      customer: state.customer_id,
+      items: [{ price: env.STRIPE_PRICE_FAMILY }],
+      default_payment_method: payment_method_id,
+      metadata: { platform: 'appsforhire', account: 'hadfield' },
+    });
+
+    const next = await setBillingState(env, {
+      subscription_id: sub.id,
+      status: sub.status,
+      current_period_end: sub.current_period_end,
+      cancel_at_period_end: !!sub.cancel_at_period_end,
+    });
+    return json({ state: next, subscribed: true });
+  } catch (e) {
+    return err(e.status || 500, e.message);
+  }
+}
+
+// Update card = reuse the setup-intent flow. Frontend collects a new card and
+// calls /confirm-subscription again, which attaches + sets default.
+async function billingUpdateCard(req, env) {
+  return billingSetupIntent(req, env);
+}
+
+async function billingCancel(req, env) {
+  const a = await requireAdmin(req, env);
+  if (!a.ok) return err(a.status, a.msg);
+
+  try {
+    const state = await getBillingState(env);
+    if (!state.subscription_id) return err(400, 'No active subscription');
+
+    // cancel_at_period_end keeps service live through what they already paid for.
+    const sub = await stripeApi(env, 'POST', `/v1/subscriptions/${encodeURIComponent(state.subscription_id)}`, {
+      cancel_at_period_end: 'true',
+    });
+    const next = await setBillingState(env, {
+      status: sub.status,
+      current_period_end: sub.current_period_end,
+      cancel_at_period_end: !!sub.cancel_at_period_end,
+    });
+    return json({ state: next });
+  } catch (e) {
+    return err(e.status || 500, e.message);
+  }
+}
+
+// Stripe webhook endpoint. No CF Access. Signature-verified.
+async function stripeWebhook(req, env) {
+  if (!env.STRIPE_WEBHOOK_SECRET) return err(500, 'STRIPE_WEBHOOK_SECRET not configured');
+  const sig = req.headers.get('stripe-signature');
+  if (!sig) return err(400, 'Missing stripe-signature header');
+
+  const raw = await req.text();
+  const valid = await verifyStripeSignature(raw, sig, env.STRIPE_WEBHOOK_SECRET);
+  if (!valid) return err(401, 'Signature verification failed');
+
+  let event;
+  try { event = JSON.parse(raw); }
+  catch { return err(400, 'Invalid JSON in webhook body'); }
+
+  console.log(`[stripe] event: ${event.type} (${event.id})`);
+
+  try {
+    switch (event.type) {
+      case 'customer.subscription.created':
+      case 'customer.subscription.updated': {
+        const sub = event.data.object;
+        await setBillingState(env, {
+          subscription_id: sub.id,
+          status: sub.status,
+          current_period_end: sub.current_period_end,
+          cancel_at_period_end: !!sub.cancel_at_period_end,
+        });
+        break;
+      }
+      case 'customer.subscription.deleted': {
+        const sub = event.data.object;
+        await setBillingState(env, {
+          status: 'canceled',
+          subscription_id: sub.id,
+          current_period_end: sub.current_period_end,
+          cancel_at_period_end: false,
+        });
+        break;
+      }
+      case 'invoice.payment_succeeded': {
+        const inv = event.data.object;
+        const periodEnd = inv.lines?.data?.[0]?.period?.end || null;
+        await setBillingState(env, {
+          last_invoice_id: inv.id,
+          status: 'active',
+          ...(periodEnd ? { current_period_end: periodEnd } : {}),
+        });
+        break;
+      }
+      case 'invoice.payment_failed': {
+        const inv = event.data.object;
+        await setBillingState(env, {
+          last_invoice_id: inv.id,
+          status: 'past_due',
+        });
+        break;
+      }
+      default:
+        // Acknowledged-but-ignored — Stripe wants a 2xx so it stops retrying.
+        break;
+    }
+  } catch (e) {
+    console.log(`[stripe] handler error for ${event.type}: ${e.message}`);
+    return err(500, 'Webhook handler failed');
+  }
+
+  return json({ received: true });
+}
+
 // ─── Main router ─────────────────────────────────────────────────────────────
 
 export default {
@@ -811,6 +1125,16 @@ export default {
 
       if (p === '/api/admin/export/csv'  && m === 'GET')   return adminExportCsv(req, env);
       if (p === '/api/admin/settings')                     return adminSettings(req, env, m);
+
+      // Billing routes (admin-guarded)
+      if (p === '/api/billing/status'               && m === 'GET')  return billingStatus(req, env);
+      if (p === '/api/billing/setup-intent'         && m === 'POST') return billingSetupIntent(req, env);
+      if (p === '/api/billing/confirm-subscription' && m === 'POST') return billingConfirmSubscription(req, env);
+      if (p === '/api/billing/update-card'          && m === 'POST') return billingUpdateCard(req, env);
+      if (p === '/api/billing/cancel'               && m === 'POST') return billingCancel(req, env);
+
+      // Stripe webhook — NOT CF-Access-protected. Verified in code.
+      if (p === '/api/stripe/webhook'               && m === 'POST') return stripeWebhook(req, env);
 
       return err(404, `No route for ${m} ${p}`);
     } catch (e) {
