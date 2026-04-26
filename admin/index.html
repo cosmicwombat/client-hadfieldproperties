@@ -561,6 +561,7 @@ async function refreshEntries() {
         <td>${hrsCell}</td>
         <td class="muted" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(e.notes || '')}</td>
         <td>
+          ${(e.clock_out && !e.worker_finished_day) ? `<button class="ghost" onclick="markFinished(${e.id})" title="Mark as finished (sets Finish Day = clock-out time so the worker can clock in tomorrow)">✓</button>` : ''}
           <button class="ghost" onclick="editEntry(${e.id})">✎</button>
           <button class="ghost" onclick="deleteEntry(${e.id})">🗑</button>
         </td>
@@ -671,6 +672,25 @@ window.deleteEntry = async function (id) {
   if (!confirm('Delete this entry? (The deletion is logged in the audit trail.)')) return;
   try { await api('/entries/' + id, { method: 'DELETE' }); toast('Deleted', 'success'); await refreshEntries(); }
   catch (e) { toast(e.message, 'error'); }
+};
+// Admin shortcut for the common case "worker forgot to tap Finish Day on their phone."
+// Sets worker_finished_day = clock_out so the worker isn't stuck in REVIEWING state
+// next time they open the app. Server stamps edited_by_admin = 1 and writes an audit row.
+window.markFinished = async function (id) {
+  // fetch the row so we know its clock_out (we don't want to send "now" — the
+  // Finish-Day stamp should match the actual end of the shift for clean reports).
+  const q = new URLSearchParams({ from: 0, to: Date.now() });
+  const r = await api('/entries?' + q.toString());
+  const e = r.entries.find(x => x.id === id);
+  if (!e) return toast('Entry not found', 'error');
+  if (!e.clock_out) return toast('Cannot mark finished — no clock-out time on this entry. Edit it first.', 'error');
+  if (e.worker_finished_day) return toast('Already marked finished.', 'success');
+  if (!confirm(`Mark ${e.worker_name}'s ${fmtTs(e.clock_in)} entry as finished?\n\nFinish-Day stamp will be set to the clock-out time (${fmtTs(e.clock_out)}). Logged to the audit trail.`)) return;
+  try {
+    await api('/entries/' + id, { method: 'PATCH', body: JSON.stringify({ worker_finished_day: e.clock_out }) });
+    toast('Marked finished', 'success');
+    await refreshEntries();
+  } catch (err) { toast(err.message, 'error'); }
 };
 
 function combineDT(dateStr, timeStr) {
