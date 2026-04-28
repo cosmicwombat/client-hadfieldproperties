@@ -683,6 +683,16 @@ async function adminDashboard(req, env) {
   const longShiftMs = 12 * 3600 * 1000;
   const dayMs = 24 * 3600 * 1000;
 
+  // Admin client passes ?weekStart=<ms> = Sunday 00:00 in the admin's local
+  // timezone. We use that so the dashboard's "Hours this week" matches the
+  // calendar week the admin reads on the wall (Sun-Sat). Old admin clients
+  // that don't send the param fall back to a rolling 7-day window.
+  const url = new URL(req.url);
+  const weekStartParam = +url.searchParams.get('weekStart');
+  const weekStart = Number.isFinite(weekStartParam) && weekStartParam > 0
+    ? weekStartParam
+    : now - 7 * dayMs;
+
   const live = await env.HADFIELD_DB.prepare(
     `SELECT e.id, e.clock_in, w.full_name, j.name AS jobsite, t.name AS task
        FROM time_entries e
@@ -704,7 +714,6 @@ async function adminDashboard(req, env) {
       ORDER BY ms DESC`
   ).bind(now, todayStart).all();
 
-  const weekStart = now - 7 * dayMs;
   const week = await env.HADFIELD_DB.prepare(
     `SELECT w.id AS worker_id, w.full_name,
             COALESCE(SUM(COALESCE(e.clock_out, ?) - e.clock_in), 0) AS ms
