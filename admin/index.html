@@ -450,9 +450,20 @@ function closeModal() { $('#modalBg').classList.remove('show'); }
 $('#modalBg').addEventListener('click', e => { if (e.target === $('#modalBg')) closeModal(); });
 
 // ---- Dashboard ----
+// Compute the start of the current week as Sunday 00:00:00 in the admin's
+// local timezone, expressed as a UTC epoch. Pass this to the dashboard
+// endpoint so "Hours this week" matches what a person reading the label
+// expects (calendar week, Sun-Sat) instead of a rolling 7-day window.
+// Browser local time handles DST automatically.
+function startOfWeekLocal() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);          // local midnight today
+  d.setDate(d.getDate() - d.getDay()); // back up to Sunday (getDay: 0=Sun)
+  return d.getTime();
+}
 async function loadDashboard() {
   try {
-    const d = await api('/dashboard');
+    const d = await api('/dashboard?weekStart=' + startOfWeekLocal());
     const todayTotal = d.today.reduce((a, b) => a + b.ms, 0);
     const weekTotal  = d.week.reduce((a, b) => a + b.ms, 0);
     $('#dashCards').innerHTML = `
